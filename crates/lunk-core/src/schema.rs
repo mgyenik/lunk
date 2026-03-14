@@ -1,18 +1,65 @@
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 use crate::errors::Result;
 
+/// Current schema version. Bump this when adding a new migration.
 pub const SCHEMA_VERSION: i32 = 1;
 
+/// A schema migration: version number, human description, and migration function.
+struct Migration {
+    version: i32,
+    description: &'static str,
+    up: fn(&Connection) -> Result<()>,
+}
+
+/// Registry of all migrations in order. Each migrate_vN function handles both
+/// DDL changes (ALTER TABLE, new indexes) and inline data transforms (backfills).
+///
+/// To add a new migration:
+/// 1. Write `fn migrate_vN(conn: &Connection) -> Result<()>` below
+/// 2. Add it to this array
+/// 3. Bump SCHEMA_VERSION to match
+///
+/// Migrations run automatically on startup. Each one runs in a savepoint so
+/// a failure rolls back only that migration, leaving earlier ones applied.
+/// The exception is FTS5 virtual table operations which cannot run inside
+/// transactions — those must be in their own migration or use rebuild_fts().
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        description: "Initial schema: entries, content, FTS5, tags, sync peers",
+        up: migrate_v1,
+    },
+    // Example of a future migration:
+    //
+    // Migration {
+    //     version: 2,
+    //     description: "Add description column with backfill from readable_html",
+    //     up: migrate_v2,
+    // },
+];
+
+/// Run all pending migrations. Called on every database open.
 pub fn run_migrations(conn: &Connection) -> Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
 
+    // Create version tracking table
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_version (
             version INTEGER NOT NULL
         );",
     )?;
+
+    // Upgrade the tracking table itself (add columns that may not exist yet).
+    // SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS, so we attempt each
+    // and ignore the "duplicate column" error.
+    for col in &[
+        "ALTER TABLE schema_version ADD COLUMN description TEXT",
+        "ALTER TABLE schema_version ADD COLUMN applied_at TEXT",
+    ] {
+        let _ = conn.execute_batch(col);
+    }
 
     let current_version: i32 = conn
         .query_row(
@@ -22,12 +69,151 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         )
         .unwrap_or(0);
 
-    if current_version < 1 {
-        migrate_v1(conn)?;
+    for migration in MIGRATIONS {
+        if migration.version > current_version {
+            tracing::info!(
+                "applying migration v{}: {}",
+                migration.version,
+                migration.description
+            );
+
+            // Run the migration in a savepoint so failures are isolated
+            let sp_name = format!("migrate_v{}", migration.version);
+            conn.execute_batch(&format!("SAVEPOINT \"{sp_name}\""))?;
+
+            match (migration.up)(conn) {
+                Ok(()) => {
+                    conn.execute(
+                        "INSERT INTO schema_version (version, description, applied_at) \
+                         VALUES (?1, ?2, datetime('now'))",
+                        params![migration.version, migration.description],
+                    )?;
+                    conn.execute_batch(&format!("RELEASE \"{sp_name}\""))?;
+                    tracing::info!("migration v{} complete", migration.version);
+                }
+                Err(e) => {
+                    tracing::error!("migration v{} failed: {e}", migration.version);
+                    conn.execute_batch(&format!("ROLLBACK TO \"{sp_name}\""))?;
+                    conn.execute_batch(&format!("RELEASE \"{sp_name}\""))?;
+                    return Err(e);
+                }
+            }
+        }
     }
 
     Ok(())
 }
+
+/// Get the current schema version from the database.
+pub fn current_version(conn: &Connection) -> Result<i32> {
+    let v = conn
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    Ok(v)
+}
+
+/// Get info about all applied migrations.
+pub fn applied_migrations(conn: &Connection) -> Result<Vec<(i32, String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT version, COALESCE(description, ''), COALESCE(applied_at, '') \
+         FROM schema_version ORDER BY version",
+    )?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Completely rebuild the FTS5 index from scratch.
+///
+/// This drops and recreates the FTS virtual table, triggers, and repopulates
+/// from entry_content + entries. Use this when:
+/// - The tokenizer configuration changes
+/// - The set of indexed columns changes
+/// - FTS index becomes corrupted
+/// - After bulk data imports that bypassed triggers
+///
+/// Returns the number of entries indexed.
+pub fn rebuild_fts(conn: &Connection) -> Result<usize> {
+    tracing::info!("rebuilding FTS index...");
+
+    // Drop existing FTS table and triggers
+    conn.execute_batch(
+        "DROP TRIGGER IF EXISTS entries_fts_insert;
+         DROP TRIGGER IF EXISTS entries_fts_delete;
+         DROP TRIGGER IF EXISTS entries_fts_update;
+         DROP TABLE IF EXISTS entries_fts;",
+    )?;
+
+    // Recreate FTS table with current tokenizer config
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE entries_fts USING fts5(
+            title,
+            extracted_text,
+            content='',
+            content_rowid='rowid',
+            tokenize='porter unicode61'
+        );",
+    )?;
+
+    // Repopulate from existing data
+    let count: usize = conn.query_row(
+        "SELECT COUNT(*) FROM entries e JOIN entry_content ec ON ec.entry_id = e.id",
+        [],
+        |row| row.get(0),
+    )?;
+
+    conn.execute_batch(
+        "INSERT INTO entries_fts(rowid, title, extracted_text)
+         SELECT e.rowid, e.title, ec.extracted_text
+         FROM entries e
+         JOIN entry_content ec ON ec.entry_id = e.id;",
+    )?;
+
+    // Recreate triggers
+    create_fts_triggers(conn)?;
+
+    tracing::info!("FTS rebuild complete: {count} entries indexed");
+    Ok(count)
+}
+
+/// Create the FTS sync triggers on entry_content.
+fn create_fts_triggers(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS entries_fts_insert AFTER INSERT ON entry_content
+        BEGIN
+            INSERT INTO entries_fts(rowid, title, extracted_text)
+            SELECT e.rowid, e.title, NEW.extracted_text
+            FROM entries e WHERE e.id = NEW.entry_id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS entries_fts_delete AFTER DELETE ON entry_content
+        BEGIN
+            INSERT INTO entries_fts(entries_fts, rowid, title, extracted_text)
+            SELECT 'delete', e.rowid, e.title, OLD.extracted_text
+            FROM entries e WHERE e.id = OLD.entry_id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS entries_fts_update AFTER UPDATE OF extracted_text ON entry_content
+        BEGIN
+            INSERT INTO entries_fts(entries_fts, rowid, title, extracted_text)
+            SELECT 'delete', e.rowid, e.title, OLD.extracted_text
+            FROM entries e WHERE e.id = OLD.entry_id;
+            INSERT INTO entries_fts(rowid, title, extracted_text)
+            SELECT e.rowid, e.title, NEW.extracted_text
+            FROM entries e WHERE e.id = NEW.entry_id;
+        END;",
+    )?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Migration v1: Initial schema
+// ---------------------------------------------------------------------------
 
 fn migrate_v1(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -44,14 +230,6 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL,
             saved_by    TEXT NOT NULL DEFAULT 'extension'
-        );
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
-            title,
-            extracted_text,
-            content='',
-            content_rowid='rowid',
-            tokenize='porter unicode61'
         );
 
         CREATE TABLE IF NOT EXISTS entry_content (
@@ -93,35 +271,57 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_entries_domain ON entries(domain);
         CREATE INDEX IF NOT EXISTS idx_entries_url ON entries(url);
         CREATE INDEX IF NOT EXISTS idx_pdf_pages_entry ON pdf_pages(entry_id, page_num);
-
-        -- FTS triggers for entry_content
-        CREATE TRIGGER IF NOT EXISTS entries_fts_insert AFTER INSERT ON entry_content
-        BEGIN
-            INSERT INTO entries_fts(rowid, title, extracted_text)
-            SELECT e.rowid, e.title, NEW.extracted_text
-            FROM entries e WHERE e.id = NEW.entry_id;
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS entries_fts_delete AFTER DELETE ON entry_content
-        BEGIN
-            INSERT INTO entries_fts(entries_fts, rowid, title, extracted_text)
-            SELECT 'delete', e.rowid, e.title, OLD.extracted_text
-            FROM entries e WHERE e.id = OLD.entry_id;
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS entries_fts_update AFTER UPDATE OF extracted_text ON entry_content
-        BEGIN
-            INSERT INTO entries_fts(entries_fts, rowid, title, extracted_text)
-            SELECT 'delete', e.rowid, e.title, OLD.extracted_text
-            FROM entries e WHERE e.id = OLD.entry_id;
-            INSERT INTO entries_fts(rowid, title, extracted_text)
-            SELECT e.rowid, e.title, NEW.extracted_text
-            FROM entries e WHERE e.id = NEW.entry_id;
-        END;
-
-        INSERT INTO schema_version (version) VALUES (1);
         ",
     )?;
 
+    // FTS and triggers are created outside the savepoint (FTS5 virtual tables
+    // have limitations with transactions in some SQLite versions).
+    // Using IF NOT EXISTS makes this safe to re-run.
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+            title,
+            extracted_text,
+            content='',
+            content_rowid='rowid',
+            tokenize='porter unicode61'
+        );",
+    )?;
+
+    create_fts_triggers(conn)?;
+
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Example: Migration v2 (commented out — shows the pattern for future use)
+// ---------------------------------------------------------------------------
+//
+// fn migrate_v2(conn: &Connection) -> Result<()> {
+//     // 1. DDL: add a new column
+//     conn.execute_batch("ALTER TABLE entries ADD COLUMN description TEXT;")?;
+//
+//     // 2. Data backfill: populate from existing content
+//     let mut stmt = conn.prepare(
+//         "SELECT ec.entry_id, ec.readable_html
+//          FROM entry_content ec
+//          WHERE ec.readable_html IS NOT NULL"
+//     )?;
+//     let entries: Vec<(String, Vec<u8>)> = stmt
+//         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.
+//         .collect::<std::result::Result<_, _>>()?;
+//
+//     tracing::info!("backfilling descriptions for {} entries", entries.len());
+//     for (id, html_bytes) in &entries {
+//         let html = String::from_utf8_lossy(html_bytes);
+//         let desc = extract_first_paragraph(&html); // hypothetical helper
+//         conn.execute(
+//             "UPDATE entries SET description = ?1 WHERE id = ?2",
+//             params![desc, id],
+//         )?;
+//     }
+//
+//     // 3. If FTS columns changed, rebuild FTS:
+//     // rebuild_fts(conn)?;
+//
+//     Ok(())
+// }

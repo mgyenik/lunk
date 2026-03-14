@@ -272,12 +272,21 @@ cmd_db() {
         path)
             resolve_db_path
             ;;
+        migrate-status)
+            cargo run -p lunk-cli --quiet -- migrate-status
+            ;;
+        rebuild-fts)
+            cyan "Rebuilding FTS index..."
+            cargo run -p lunk-cli --quiet -- rebuild-fts
+            ;;
         *)
             echo "Usage: ./dev db <command>"
             echo
             echo "Commands:"
             echo "  reset [--profile NAME]   Delete the database (confirms for production)"
             echo "  path                     Print the database file path"
+            echo "  migrate-status           Show schema version and applied migrations"
+            echo "  rebuild-fts              Rebuild the full-text search index from scratch"
             echo
             echo "Current profile: $LUNK_PROFILE"
             echo "Current db path: $(resolve_db_path)"

@@ -135,6 +135,10 @@ enum Commands {
         #[arg(long, default_value = "chrome")]
         browser: String,
     },
+    /// Rebuild the full-text search index from scratch
+    RebuildFts,
+    /// Show database migration status
+    MigrateStatus,
 }
 
 #[derive(Subcommand)]
@@ -214,6 +218,8 @@ async fn main() {
         Some(Commands::InstallNativeMessaging { extension_id, browser }) => {
             cli::install_native_messaging(&extension_id, &browser)
         }
+        Some(Commands::RebuildFts) => cli::rebuild_fts(),
+        Some(Commands::MigrateStatus) => cli::migrate_status(),
         None => {
             eprintln!("No command provided. Run `lunk --help` for usage.");
             Ok(())

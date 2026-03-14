@@ -5,6 +5,7 @@ use lunk_core::db;
 use lunk_core::errors::{LunkError, Result};
 use lunk_core::models::*;
 use lunk_core::repo;
+use lunk_core::schema;
 use lunk_core::search;
 use lunk_core::sync;
 use lunk_core::transport::SyncNode;
@@ -370,6 +371,58 @@ pub fn export(output: Option<&str>, status: Option<&str>, with_content: bool) ->
         eprintln!("Exported {total} entries to {path}");
     } else {
         println!("{json_str}");
+    }
+
+    Ok(())
+}
+
+pub fn rebuild_fts() -> Result<()> {
+    let profile = config::active_profile();
+    let db_path = Config::db_path()?;
+    eprintln!("profile: {profile}");
+    eprintln!("database: {}", db_path.display());
+
+    let conn = open_db()?;
+    let count = schema::rebuild_fts(&conn)?;
+    println!("Rebuilt FTS index: {count} entries indexed");
+    Ok(())
+}
+
+pub fn migrate_status() -> Result<()> {
+    let profile = config::active_profile();
+    let db_path = Config::db_path()?;
+    println!("profile:  {profile}");
+    println!("database: {}", db_path.display());
+    println!();
+
+    let conn = open_db()?;
+    let current = schema::current_version(&conn)?;
+    let target = schema::SCHEMA_VERSION;
+
+    println!("schema version: {current} (target: {target})");
+
+    if current < target {
+        println!("  {} pending migration(s)", target - current);
+    } else {
+        println!("  up to date");
+    }
+
+    println!();
+    println!("applied migrations:");
+
+    let migrations = schema::applied_migrations(&conn)?;
+    if migrations.is_empty() {
+        println!("  (none)");
+    } else {
+        for (version, desc, applied_at) in &migrations {
+            let at = if applied_at.is_empty() {
+                "(unknown)".to_string()
+            } else {
+                applied_at.clone()
+            };
+            println!("  v{version}: {desc}");
+            println!("    applied: {at}");
+        }
     }
 
     Ok(())
