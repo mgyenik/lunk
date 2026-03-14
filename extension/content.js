@@ -33,6 +33,15 @@
     // Check if this is a PDF
     if (isPdfPage()) {
       result.content_type = "pdf";
+      // Use filename from URL if document.title is empty
+      if (!result.title) {
+        try {
+          const path = new URL(window.location.href).pathname;
+          result.title = decodeURIComponent(path.split("/").pop() || "Untitled PDF");
+        } catch {
+          result.title = "Untitled PDF";
+        }
+      }
       try {
         const pdfData = await fetchPdfData();
         result.pdf_base64 = pdfData;

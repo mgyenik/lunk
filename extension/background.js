@@ -1,7 +1,10 @@
 // Background service worker: manages native messaging, context menus, and keyboard shortcuts.
 
 const NATIVE_HOST = "com.lunk.app";
-const API_BASE = "http://127.0.0.1:9723/api/v1";
+const PORT_PROD = 9723;
+const PORT_DEV = 9724;
+let apiBase = null; // resolved on first use
+let isDevExtension = null; // resolved on first use
 
 let nativePort = null;
 let pendingRequests = new Map(); // requestId -> {resolve, reject, timeout}
@@ -30,10 +33,10 @@ function connectNativeHost() {
       console.warn("Lunk: native host disconnected:", error?.message || "unknown");
       nativePort = null;
 
-      // Reject all pending requests
-      for (const [id, { reject, timeout }] of pendingRequests) {
+      // Fall back to HTTP for all pending requests
+      for (const [id, { resolve, reject, timeout, action, data }] of pendingRequests) {
         clearTimeout(timeout);
-        reject(new Error("Native host disconnected"));
+        sendHttpMessage(action, data).then(resolve).catch(reject);
       }
       pendingRequests.clear();
     });
@@ -62,7 +65,7 @@ function sendNativeMessage(action, data) {
       sendHttpMessage(action, data).then(resolve).catch(reject);
     }, 5000);
 
-    pendingRequests.set(requestId, { resolve, reject, timeout: timeoutHandle });
+    pendingRequests.set(requestId, { resolve, reject, timeout: timeoutHandle, action, data });
 
     try {
       port.postMessage({ action, data, _requestId: requestId });
@@ -77,8 +80,50 @@ function sendNativeMessage(action, data) {
 
 // --- HTTP API Fallback ---
 
+async function detectDevExtension() {
+  if (isDevExtension !== null) return isDevExtension;
+  try {
+    const self = await chrome.management.getSelf();
+    isDevExtension = self.installType === "development";
+  } catch {
+    isDevExtension = false;
+  }
+  return isDevExtension;
+}
+
+async function resolveApiBase() {
+  if (apiBase) {
+    // Verify it's still alive
+    try {
+      const resp = await fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(1000) });
+      if (resp.ok) return apiBase;
+    } catch { /* fall through to re-discover */ }
+    apiBase = null;
+  }
+
+  // Unpacked extensions prefer the dev server; installed extensions prefer prod
+  const isDev = await detectDevExtension();
+  const ports = isDev ? [PORT_DEV, PORT_PROD] : [PORT_PROD, PORT_DEV];
+
+  for (const port of ports) {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/api/v1/health`, {
+        signal: AbortSignal.timeout(1000),
+      });
+      if (resp.ok) {
+        apiBase = `http://127.0.0.1:${port}/api/v1`;
+        console.log(`Lunk: using ${isDev ? "dev" : "prod"} server on port ${port}`);
+        return apiBase;
+      }
+    } catch { /* try next port */ }
+  }
+
+  throw new Error("Lunk server not reachable on any port");
+}
+
 async function sendHttpMessage(action, data) {
   try {
+    const API_BASE = await resolveApiBase();
     switch (action) {
       case "save_entry": {
         const body = {
@@ -193,7 +238,21 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // --- Core Save Logic ---
 
+async function ensureContentScript(tabId) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { action: "ping" });
+  } catch {
+    // Content script not injected — inject it now
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["lib/Readability.js", "content.js"],
+    });
+  }
+}
+
 async function savePage(tabId, status) {
+  await ensureContentScript(tabId);
+
   // Send extraction request to content script
   const result = await chrome.tabs.sendMessage(tabId, {
     action: "extract",

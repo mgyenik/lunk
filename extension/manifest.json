@@ -7,7 +7,12 @@
     "activeTab",
     "nativeMessaging",
     "contextMenus",
-    "storage"
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:9723/*",
+    "http://127.0.0.1:9724/*"
   ],
   "background": {
     "service_worker": "background.js"
