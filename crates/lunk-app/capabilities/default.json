@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicelvn-io/tauri/tauri-v2/crates/tauri-utils/schema/capability.schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Lunk",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "dialog:allow-open"
+  ]
+}

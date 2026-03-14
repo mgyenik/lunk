@@ -1,0 +1,291 @@
+use std::io::{self, Read, Write};
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use serde::{Deserialize, Serialize};
+
+use lunk_core::config::Config;
+use lunk_core::db;
+use lunk_core::models::*;
+use lunk_core::repo;
+
+#[derive(Deserialize)]
+struct NativeMessage {
+    action: String,
+    data: Option<serde_json::Value>,
+    #[serde(rename = "_requestId")]
+    request_id: Option<serde_json::Value>,
+}
+
+#[derive(Serialize, Default)]
+struct NativeResponse {
+    success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(rename = "_requestId", skip_serializing_if = "Option::is_none")]
+    request_id: Option<serde_json::Value>,
+}
+
+pub async fn run() -> lunk_core::errors::Result<()> {
+    let db_path = Config::db_path()?;
+    let conn = db::open_database(&db_path)?;
+
+    loop {
+        // Read message length (4 bytes, little-endian)
+        let len = match io::stdin().lock().read_u32::<LittleEndian>() {
+            Ok(len) => len as usize,
+            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                // Chrome closed the connection
+                break;
+            }
+            Err(e) => return Err(lunk_core::errors::LunkError::Io(e)),
+        };
+
+        if len == 0 || len > 1024 * 1024 * 100 {
+            // Sanity check: messages shouldn't exceed 100MB
+            break;
+        }
+
+        // Read message body
+        let mut buf = vec![0u8; len];
+        io::stdin().lock().read_exact(&mut buf)?;
+
+        let msg: NativeMessage = serde_json::from_slice(&buf)?;
+        let request_id = msg.request_id.clone();
+
+        // Process message
+        let mut response = handle_message(&conn, msg);
+        response.request_id = request_id;
+
+        // Write response
+        let response_bytes = serde_json::to_vec(&response)?;
+        let mut stdout = io::stdout().lock();
+        stdout.write_u32::<LittleEndian>(response_bytes.len() as u32)?;
+        stdout.write_all(&response_bytes)?;
+        stdout.flush()?;
+    }
+
+    Ok(())
+}
+
+fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResponse {
+    match msg.action.as_str() {
+        "ping" => NativeResponse {
+            success: true,
+            data: Some(serde_json::json!({ "pong": true })),
+            error: None,
+            ..Default::default()
+        },
+
+        "save_entry" => {
+            let Some(data) = msg.data else {
+                return NativeResponse {
+                    success: false,
+                    data: None,
+                    error: Some("missing data".to_string()),
+                    ..Default::default()
+                };
+            };
+
+            match handle_save_entry(conn, data) {
+                Ok(entry) => NativeResponse {
+                    success: true,
+                    data: Some(serde_json::to_value(entry).unwrap()),
+                    ..Default::default()
+                },
+                Err(e) => NativeResponse {
+                    success: false,
+                    data: None,
+                    error: Some(e.to_string()),
+                    ..Default::default()
+                },
+            }
+        }
+
+        "get_status" => {
+            let url = msg
+                .data
+                .as_ref()
+                .and_then(|d| d.get("url"))
+                .and_then(|v| v.as_str());
+
+            match url {
+                Some(url) => match repo::entry_exists_by_url(conn, url) {
+                    Ok(Some(id)) => {
+                        match repo::get_entry(conn, &id) {
+                            Ok(entry) => NativeResponse {
+                                success: true,
+                                data: Some(serde_json::json!({
+                                    "saved": true,
+                                    "entry": entry,
+                                })),
+                                ..Default::default()
+                            },
+                            Err(e) => NativeResponse {
+                                success: false,
+                                error: Some(e.to_string()),
+                                ..Default::default()
+                            },
+                        }
+                    }
+                    Ok(None) => NativeResponse {
+                        success: true,
+                        data: Some(serde_json::json!({ "saved": false })),
+                        ..Default::default()
+                    },
+                    Err(e) => NativeResponse {
+                        success: false,
+                        error: Some(e.to_string()),
+                        ..Default::default()
+                    },
+                },
+                None => NativeResponse {
+                    success: false,
+                    data: None,
+                    error: Some("missing url".to_string()),
+                    ..Default::default()
+                },
+            }
+        }
+
+        "update_status" => {
+            let id = msg
+                .data
+                .as_ref()
+                .and_then(|d| d.get("id"))
+                .and_then(|v| v.as_str());
+            let status = msg
+                .data
+                .as_ref()
+                .and_then(|d| d.get("status"))
+                .and_then(|v| v.as_str());
+
+            match (id, status) {
+                (Some(id), Some(status)) => {
+                    let uuid = match uuid::Uuid::parse_str(id) {
+                        Ok(u) => u,
+                        Err(e) => {
+                            return NativeResponse {
+                                success: false,
+                                data: None,
+                                error: Some(format!("invalid id: {e}")),
+                                ..Default::default()
+                            };
+                        }
+                    };
+                    let status = match EntryStatus::from_str(status) {
+                        Some(s) => s,
+                        None => {
+                            return NativeResponse {
+                                success: false,
+                                data: None,
+                                error: Some(format!("invalid status: {status}")),
+                                ..Default::default()
+                            };
+                        }
+                    };
+
+                    match repo::update_entry_status(conn, &uuid, status) {
+                        Ok(()) => NativeResponse {
+                            success: true,
+                            ..Default::default()
+                        },
+                        Err(e) => NativeResponse {
+                            success: false,
+                            error: Some(e.to_string()),
+                            ..Default::default()
+                        },
+                    }
+                }
+                _ => NativeResponse {
+                    success: false,
+                    data: None,
+                    error: Some("missing id or status".to_string()),
+                    ..Default::default()
+                },
+            }
+        }
+
+        _ => NativeResponse {
+            success: false,
+            data: None,
+            error: Some(format!("unknown action: {}", msg.action)),
+            ..Default::default()
+        },
+    }
+}
+
+fn handle_save_entry(
+    conn: &rusqlite::Connection,
+    data: serde_json::Value,
+) -> lunk_core::errors::Result<Entry> {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+
+    let url = data.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let title = data
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Untitled")
+        .to_string();
+    let extracted_text = data
+        .get("extracted_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let content_type_str = data
+        .get("content_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("article");
+    let content_type = ContentType::from_str(content_type_str).unwrap_or(ContentType::Article);
+    let status_str = data
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unread");
+    let status = EntryStatus::from_str(status_str);
+
+    let snapshot_html = data
+        .get("snapshot_html")
+        .and_then(|v| v.as_str())
+        .and_then(|s| engine.decode(s).ok());
+    let readable_html = data
+        .get("readable_html")
+        .and_then(|v| v.as_str())
+        .and_then(|s| engine.decode(s).ok());
+    let pdf_data = data
+        .get("pdf_base64")
+        .and_then(|v| v.as_str())
+        .and_then(|s| engine.decode(s).ok());
+
+    let tags = data
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        });
+
+    // Check for duplicate URL
+    if let Some(ref url) = url {
+        if let Some(existing_id) = repo::entry_exists_by_url(conn, url)? {
+            return repo::get_entry(conn, &existing_id);
+        }
+    }
+
+    let req = CreateEntryRequest {
+        url,
+        title,
+        content_type,
+        extracted_text,
+        snapshot_html,
+        readable_html,
+        pdf_data,
+        status,
+        tags,
+        source: SaveSource::Extension,
+    };
+
+    repo::create_entry(conn, req)
+}

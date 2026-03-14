@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "crates/lunk-core",
+    "crates/lunk-server",
+    "crates/lunk-cli",
+    "crates/lunk-app",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
