@@ -80,8 +80,8 @@ pub fn list_entries(
     params: ListParamsInput,
 ) -> Result<ListResultResponse, String> {
     let list_params = ListParams {
-        status: params.status.as_deref().and_then(EntryStatus::from_str),
-        content_type: params.content_type.as_deref().and_then(ContentType::from_str),
+        status: params.status.as_deref().and_then(EntryStatus::parse),
+        content_type: params.content_type.as_deref().and_then(ContentType::parse),
         tag: params.tag,
         domain: params.domain,
         limit: params.limit.or(Some(50)),
@@ -152,7 +152,7 @@ pub fn update_entry_status(
     status: String,
 ) -> Result<(), String> {
     let uuid = uuid::Uuid::parse_str(&id).map_err(|e| format!("invalid id: {e}"))?;
-    let status = EntryStatus::from_str(&status)
+    let status = EntryStatus::parse(&status)
         .ok_or_else(|| format!("invalid status: {status}"))?;
 
     with_db(&db, |conn| repo::update_entry_status(conn, &uuid, status))
@@ -172,7 +172,7 @@ pub fn delete_entry(
 pub fn get_tags(
     db: tauri::State<'_, DbPool>,
 ) -> Result<Vec<TagWithCount>, String> {
-    with_db(&db, |conn| repo::get_tags(conn)).map_err(|e| e.to_string())
+    with_db(&db, repo::get_tags).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -240,7 +240,7 @@ pub fn get_sync_status(
     sync_node: tauri::State<'_, SyncNodeCell>,
 ) -> Result<SyncStatusResponse, String> {
     let node_id = sync_node.get().map(|n| n.node_id_string());
-    let peers = with_db(&db, |conn| sync::get_sync_peers(conn)).map_err(|e| e.to_string())?;
+    let peers = with_db(&db, sync::get_sync_peers).map_err(|e| e.to_string())?;
     Ok(SyncStatusResponse {
         sync_available: sync_node.get().is_some(),
         node_id,
@@ -252,7 +252,7 @@ pub fn get_sync_status(
 pub fn get_sync_peers(
     db: tauri::State<'_, DbPool>,
 ) -> Result<Vec<SyncPeer>, String> {
-    with_db(&db, |conn| sync::get_sync_peers(conn)).map_err(|e| e.to_string())
+    with_db(&db, sync::get_sync_peers).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

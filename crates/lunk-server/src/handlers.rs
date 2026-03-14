@@ -144,11 +144,11 @@ async fn create_entry(
     use base64::Engine;
     let engine = base64::engine::general_purpose::STANDARD;
 
-    let content_type = ContentType::from_str(&body.content_type)
+    let content_type = ContentType::parse(&body.content_type)
         .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("invalid content_type: {}", body.content_type)))?;
 
     let status = body.status.as_deref()
-        .map(|s| EntryStatus::from_str(s)
+        .map(|s| EntryStatus::parse(s)
             .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("invalid status: {s}"))))
         .transpose()?;
 
@@ -195,8 +195,8 @@ async fn list_entries(
     let offset = query.offset.unwrap_or(0);
 
     let params = ListParams {
-        status: query.status.as_deref().and_then(EntryStatus::from_str),
-        content_type: query.content_type.as_deref().and_then(ContentType::from_str),
+        status: query.status.as_deref().and_then(EntryStatus::parse),
+        content_type: query.content_type.as_deref().and_then(ContentType::parse),
         tag: query.tag,
         domain: query.domain,
         sort: query.sort,
@@ -234,7 +234,7 @@ async fn update_entry(
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
 
     let status = body.status.as_deref()
-        .map(|s| EntryStatus::from_str(s)
+        .map(|s| EntryStatus::parse(s)
             .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("invalid status: {s}"))))
         .transpose()?;
 
@@ -346,7 +346,7 @@ async fn mark_archived(
 async fn get_tags(
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<TagWithCount>>> {
-    let tags = with_db(&state.db, |conn| repo::get_tags(conn))?;
+    let tags = with_db(&state.db, repo::get_tags)?;
     Ok(Json(tags))
 }
 
@@ -385,7 +385,7 @@ async fn sync_status(
     State(state): State<AppState>,
 ) -> ApiResult<Json<SyncStatusResponse>> {
     let node_id = state.sync_node.as_ref().map(|n| n.node_id_string());
-    let peers = with_db(&state.db, |conn| lunk_core::sync::get_sync_peers(conn))?;
+    let peers = with_db(&state.db, lunk_core::sync::get_sync_peers)?;
     Ok(Json(SyncStatusResponse {
         sync_available: state.sync_node.is_some(),
         node_id,
@@ -396,7 +396,7 @@ async fn sync_status(
 async fn list_sync_peers(
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<lunk_core::models::SyncPeer>>> {
-    let peers = with_db(&state.db, |conn| lunk_core::sync::get_sync_peers(conn))?;
+    let peers = with_db(&state.db, lunk_core::sync::get_sync_peers)?;
     Ok(Json(peers))
 }
 

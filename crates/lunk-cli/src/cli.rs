@@ -48,7 +48,7 @@ pub async fn save_url(url: &str, status: &str, tags: &[String]) -> Result<()> {
         return Err(LunkError::Other("could not extract any text from the page".to_string()));
     }
 
-    let entry_status = EntryStatus::from_str(status)
+    let entry_status = EntryStatus::parse(status)
         .ok_or_else(|| LunkError::InvalidInput(format!("invalid status: {status}")))?;
 
     let conn = open_db()?;
@@ -194,8 +194,8 @@ pub async fn list_entries(
     let conn = open_db()?;
 
     let params = ListParams {
-        status: status.and_then(EntryStatus::from_str),
-        content_type: content_type.and_then(ContentType::from_str),
+        status: status.and_then(EntryStatus::parse),
+        content_type: content_type.and_then(ContentType::parse),
         tag: tag.map(|s| s.to_string()),
         limit: Some(limit),
         ..Default::default()
@@ -249,7 +249,7 @@ pub async fn set_status(id: &str, status: &str) -> Result<()> {
     let conn = open_db()?;
     let uuid = uuid::Uuid::parse_str(id)
         .map_err(|e| LunkError::InvalidInput(format!("invalid id: {e}")))?;
-    let status = EntryStatus::from_str(status)
+    let status = EntryStatus::parse(status)
         .ok_or_else(|| LunkError::InvalidInput(format!("invalid status: {status}")))?;
 
     repo::update_entry_status(&conn, &uuid, status)?;
@@ -330,7 +330,7 @@ pub fn export(output: Option<&str>, status: Option<&str>, with_content: bool) ->
     let conn = open_db()?;
 
     let params = ListParams {
-        status: status.and_then(EntryStatus::from_str),
+        status: status.and_then(EntryStatus::parse),
         limit: Some(10_000),
         ..Default::default()
     };
@@ -341,15 +341,15 @@ pub fn export(output: Option<&str>, status: Option<&str>, with_content: bool) ->
         .iter()
         .map(|e| {
             let mut obj = serde_json::to_value(e).unwrap_or_default();
-            if with_content {
-                if let Ok(content) = repo::get_entry_content(&conn, &e.id) {
-                    obj["extracted_text"] = serde_json::Value::String(content.extracted_text);
-                    if let Some(html) = content.readable_html {
-                        obj["readable_html_bytes"] = serde_json::Value::Number(html.len().into());
-                    }
-                    if let Some(pdf) = content.pdf_data {
-                        obj["pdf_data_bytes"] = serde_json::Value::Number(pdf.len().into());
-                    }
+            if with_content
+                && let Ok(content) = repo::get_entry_content(&conn, &e.id)
+            {
+                obj["extracted_text"] = serde_json::Value::String(content.extracted_text);
+                if let Some(html) = content.readable_html {
+                    obj["readable_html_bytes"] = serde_json::Value::Number(html.len().into());
+                }
+                if let Some(pdf) = content.pdf_data {
+                    obj["pdf_data_bytes"] = serde_json::Value::Number(pdf.len().into());
                 }
             }
             obj

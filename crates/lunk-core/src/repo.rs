@@ -436,9 +436,9 @@ struct EntryRow {
 fn row_to_entry(row: EntryRow, tags: Vec<String>) -> Result<Entry> {
     let id = Uuid::parse_str(&row.id)
         .map_err(|e| LunkError::Other(format!("invalid uuid: {e}")))?;
-    let content_type = ContentType::from_str(&row.content_type)
+    let content_type = ContentType::parse(&row.content_type)
         .ok_or_else(|| LunkError::Other(format!("invalid content_type: {}", row.content_type)))?;
-    let status = EntryStatus::from_str(&row.status)
+    let status = EntryStatus::parse(&row.status)
         .ok_or_else(|| LunkError::Other(format!("invalid status: {}", row.status)))?;
     let created_at = chrono::DateTime::parse_from_rfc3339(&row.created_at)
         .map_err(|e| LunkError::Other(format!("invalid created_at: {e}")))?

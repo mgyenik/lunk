@@ -174,7 +174,7 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
                             };
                         }
                     };
-                    let status = match EntryStatus::from_str(status) {
+                    let status = match EntryStatus::parse(status) {
                         Some(s) => s,
                         None => {
                             return NativeResponse {
@@ -238,12 +238,12 @@ fn handle_save_entry(
         .get("content_type")
         .and_then(|v| v.as_str())
         .unwrap_or("article");
-    let content_type = ContentType::from_str(content_type_str).unwrap_or(ContentType::Article);
+    let content_type = ContentType::parse(content_type_str).unwrap_or(ContentType::Article);
     let status_str = data
         .get("status")
         .and_then(|v| v.as_str())
         .unwrap_or("unread");
-    let status = EntryStatus::from_str(status_str);
+    let status = EntryStatus::parse(status_str);
 
     let snapshot_html = data
         .get("snapshot_html")
@@ -268,10 +268,10 @@ fn handle_save_entry(
         });
 
     // Check for duplicate URL
-    if let Some(ref url) = url {
-        if let Some(existing_id) = repo::entry_exists_by_url(conn, url)? {
-            return repo::get_entry(conn, &existing_id);
-        }
+    if let Some(ref url) = url
+        && let Some(existing_id) = repo::entry_exists_by_url(conn, url)?
+    {
+        return repo::get_entry(conn, &existing_id);
     }
 
     let req = CreateEntryRequest {

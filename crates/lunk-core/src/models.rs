@@ -17,7 +17,7 @@ impl ContentType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "article" => Some(ContentType::Article),
             "pdf" => Some(ContentType::Pdf),
@@ -43,7 +43,7 @@ impl EntryStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "unread" => Some(EntryStatus::Unread),
             "read" => Some(EntryStatus::Read),

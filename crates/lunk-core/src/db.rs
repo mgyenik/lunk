@@ -64,10 +64,10 @@ pub fn try_load_crsqlite(conn: &Connection, ext_path: Option<&str>) -> bool {
             paths.push(std::path::PathBuf::from(p));
         }
 
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                paths.push(dir.join(ext_name));
-            }
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(dir) = exe.parent()
+        {
+            paths.push(dir.join(ext_name));
         }
 
         if let Ok(data_dir) = crate::config::Config::data_dir() {
@@ -87,10 +87,9 @@ pub fn try_load_crsqlite(conn: &Connection, ext_path: Option<&str>) -> bool {
         }
 
         let result = unsafe {
-            let _guard = match conn.load_extension_enable() {
-                Ok(guard) => guard,
-                Err(_) => continue,
-            };
+            if conn.load_extension_enable().is_err() {
+                continue;
+            }
             conn.load_extension(path, Some("sqlite3_crsqlite_init"))
         };
 

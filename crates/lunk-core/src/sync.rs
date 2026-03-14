@@ -186,10 +186,10 @@ pub fn rebuild_fts_after_sync(conn: &Connection, changesets: &[ChangesetRow]) ->
         // Strip any surrounding quotes that cr-sqlite may add
         let id_str = entry_id_pk.trim_matches('\'');
 
-        if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-            if let Err(e) = crate::search::rebuild_fts_for_entry(conn, &uuid) {
-                tracing::warn!("failed to rebuild FTS for {id_str}: {e}");
-            }
+        if let Ok(uuid) = uuid::Uuid::parse_str(id_str)
+            && let Err(e) = crate::search::rebuild_fts_for_entry(conn, &uuid)
+        {
+            tracing::warn!("failed to rebuild FTS for {id_str}: {e}");
         }
     }
 

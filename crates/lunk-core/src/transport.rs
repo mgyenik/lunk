@@ -35,7 +35,7 @@ impl SyncNode {
         let handler = SyncProtocol { db: db.clone() };
 
         let router = Router::builder(endpoint.clone())
-            .accept(SYNC_ALPN.to_vec(), Arc::new(handler))
+            .accept(SYNC_ALPN, Arc::new(handler))
             .spawn();
 
         tracing::info!("sync node started: {}", endpoint.id());
@@ -144,7 +144,7 @@ impl SyncNode {
 
     /// Sync with all known peers.
     pub async fn sync_all(&self) -> Vec<(String, std::result::Result<SyncReport, String>)> {
-        let peers = db::with_db(&self.db, |c| sync::get_sync_peers(c)).unwrap_or_default();
+        let peers = db::with_db(&self.db, sync::get_sync_peers).unwrap_or_default();
 
         let mut results = Vec::new();
         for peer in peers {
