@@ -20,7 +20,7 @@ axum = "0.8"
 pdf-extract = "0.10"
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
 
 [lib]
 name = "lunk_app_lib"

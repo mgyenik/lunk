@@ -158,7 +158,7 @@ async fn create_entry(
         _ => SaveSource::Api,
     };
 
-    let req = CreateEntryRequest {
+    let mut req = CreateEntryRequest {
         url: body.url,
         title: body.title,
         content_type,
@@ -180,6 +180,48 @@ async fn create_entry(
         if let Some(existing_id) = existing {
             let entry = with_db(&state.db, |conn| repo::get_entry(conn, &existing_id))?;
             return Ok((StatusCode::OK, Json(entry)));
+        }
+    }
+
+    // For PDFs: extract text server-side if not provided
+    if content_type == ContentType::Pdf
+        && let Some(ref pdf_data) = req.pdf_data
+    {
+        let text = pdf_extract::extract_text_from_mem(pdf_data)
+            .unwrap_or_default();
+        let pages: Vec<(i32, String)> = text
+            .split('\u{0C}')
+            .enumerate()
+            .filter_map(|(i, page_text)| {
+                let trimmed = page_text.trim().to_string();
+                if trimmed.is_empty() { None } else { Some((i as i32 + 1, trimmed)) }
+            })
+            .collect();
+        let full_text: String = pages.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n\n");
+
+        // Use URL filename as title if title is empty
+        let mut req = req;
+        if req.title.is_empty() {
+            req.title = req.url.as_deref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+                .and_then(|f| if f.is_empty() { None } else { Some(f) })
+                .unwrap_or_else(|| "Untitled PDF".to_string());
+        }
+        if !full_text.is_empty() {
+            req.extracted_text = full_text;
+        }
+
+        let entry = with_db(&state.db, |conn| repo::create_pdf_entry(conn, req, pages))?;
+        return Ok((StatusCode::CREATED, Json(entry)));
+    }
+
+    // For articles: use URL page title if title is empty
+    if req.title.is_empty() {
+        if let Some(ref url) = req.url {
+            req.title = url.clone();
+        } else {
+            req.title = "Untitled".to_string();
         }
     }
 

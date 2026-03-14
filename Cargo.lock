@@ -3205,12 +3205,14 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "lunk-core",
+ "pdf-extract",
  "serde",
  "serde_json",
  "tokio",
  "tower",
  "tower-http",
  "tracing",
+ "url",
  "uuid",
 ]
 
