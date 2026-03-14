@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+# Colors
+red()    { printf "\033[1;31m%s\033[0m\n" "$1"; }
+green()  { printf "\033[1;32m%s\033[0m\n" "$1"; }
+yellow() { printf "\033[1;33m%s\033[0m\n" "$1"; }
+cyan()   { printf "\033[1;36m%s\033[0m\n" "$1"; }
+bold()   { printf "\033[1m%s\033[0m\n" "$1"; }
+
+# ---------------------------------------------------------------------------
+# Profile resolution — mirrors Rust logic in lunk_core::config
+#
+# LUNK_PROFILE env var selects the profile.
+# The dev script defaults to "dev" (same as debug Rust builds).
+# Use LUNK_PROFILE=default to target the production database.
+# ---------------------------------------------------------------------------
+LUNK_PROFILE="${LUNK_PROFILE:-dev}"
+export LUNK_PROFILE
+
+# Resolve data directory for the active profile (mirrors Config::data_dir)
+resolve_data_dir() {
+    if [[ -n "${LUNK_DATA_DIR:-}" ]]; then
+        echo "$LUNK_DATA_DIR"
+        return
+    fi
+    local base="${XDG_DATA_HOME:-$HOME/.local/share}/lunk"
+    if [[ "$LUNK_PROFILE" == "default" ]]; then
+        echo "$base"
+    else
+        echo "$base/profiles/$LUNK_PROFILE"
+    fi
+}
+
+resolve_db_path() {
+    echo "$(resolve_data_dir)/lunk.db"
+}
+
+print_profile() {
+    local db_path
+    db_path="$(resolve_db_path)"
+    if [[ "$LUNK_PROFILE" == "default" ]]; then
+        yellow "  profile:  $LUNK_PROFILE (production)"
+    else
+        cyan "  profile:  $LUNK_PROFILE"
+    fi
+    cyan "  database: $db_path"
+}
+
+# ---------------------------------------------------------------------------
+# doctor — check and install prerequisites
+# ---------------------------------------------------------------------------
+cmd_doctor() {
+    bold "Checking prerequisites..."
+    echo
+    local ok=true
+
+    # Rust toolchain
+    if command -v rustc &>/dev/null; then
+        green "  rustc $(rustc --version | awk '{print $2}')"
+    else
+        red "  rustc — not found"
+        echo "    Install: https://rustup.rs"
+        ok=false
+    fi
+
+    if command -v cargo &>/dev/null; then
+        green "  cargo $(cargo --version | awk '{print $2}')"
+    else
+        red "  cargo — not found"
+        ok=false
+    fi
+
+    # bun
+    if command -v bun &>/dev/null; then
+        green "  bun   $(bun --version)"
+    else
+        red "  bun   — not found"
+        echo "    Install: curl -fsSL https://bun.sh/install | bash"
+        ok=false
+    fi
+
+    # cargo-tauri
+    if cargo tauri --version &>/dev/null 2>&1; then
+        green "  tauri-cli $(cargo tauri --version 2>/dev/null | awk '{print $2}')"
+    else
+        yellow "  tauri-cli — not found (installing...)"
+        cargo install tauri-cli --version "^2" --locked
+        green "  tauri-cli installed"
+    fi
+
+    # System libraries (Linux only)
+    if [[ "$(uname -s)" == "Linux" ]]; then
+        echo
+        bold "  System libraries (Linux):"
+        local libs_ok=true
+        # Only webkit2gtk and gtk are link-time deps.
+        # libappindicator is dlopen'd at runtime (already covered by the runtime package).
+        # librsvg is not in our dependency tree at all.
+        for lib in webkit2gtk-4.1 gtk+-3.0; do
+            if pkg-config --exists "$lib" 2>/dev/null; then
+                green "    $lib"
+            else
+                red "    $lib — not found"
+                libs_ok=false
+            fi
+        done
+
+        if [[ "$libs_ok" == "false" ]]; then
+            echo
+            yellow "  Install missing libraries:"
+            echo "    sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev pkg-config"
+            ok=false
+        fi
+    fi
+
+    echo
+    print_profile
+    echo
+    if [[ "$ok" == "true" ]]; then
+        green "All prerequisites met."
+    else
+        red "Some prerequisites are missing. See above."
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# up — start tauri dev (Vite HMR + Rust rebuild)
+# ---------------------------------------------------------------------------
+cmd_up() {
+    # Quick prereq check
+    if ! command -v cargo &>/dev/null || ! command -v bun &>/dev/null; then
+        red "Missing prerequisites. Run './dev doctor' first."
+        return 1
+    fi
+
+    # Ensure frontend deps are installed
+    if [[ ! -d frontend/node_modules ]]; then
+        cyan "Installing frontend dependencies..."
+        cd frontend && bun install && cd ..
+    fi
+
+    echo
+    print_profile
+    echo
+    cyan "Starting Tauri dev (frontend HMR + Rust rebuild on save)..."
+    echo
+    yellow "  Frontend:  http://localhost:5173 (Vite HMR)"
+    yellow "  HTTP API:  http://127.0.0.1:9724 (starts with app)"
+    echo
+    cd crates/lunk-app && cargo tauri dev
+}
+
+# ---------------------------------------------------------------------------
+# ext — Chrome extension dev instructions
+# ---------------------------------------------------------------------------
+cmd_ext() {
+    bold "Chrome Extension Setup"
+    echo
+    echo "  The extension/ directory is directly loadable — no build step needed."
+    echo
+    echo "  1. Open chrome://extensions"
+    echo "  2. Enable 'Developer mode' (top right)"
+    echo "  3. Click 'Load unpacked'"
+    echo "  4. Select: $(pwd)/extension"
+    echo
+    echo "  After code changes:"
+    echo "  - popup/background changes: click the reload button in chrome://extensions"
+    echo "  - content script changes: reload the target page too"
+    echo
+    yellow "  Tip: The extension talks to the HTTP API."
+    yellow "       Make sure the app is running (./dev up) or the CLI server (lunk serve)."
+
+    # Try to detect the extension ID if Chrome is running
+    local nm_dir="$HOME/.config/google-chrome/NativeMessagingHosts"
+    if [[ -f "$nm_dir/com.lunk.app.json" ]]; then
+        echo
+        green "  Native messaging host is installed."
+    else
+        echo
+        yellow "  Native messaging not installed. After loading the extension, run:"
+        echo "    lunk install-native-messaging --extension-id <ID_FROM_CHROME>"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# test — run all tests and checks
+# ---------------------------------------------------------------------------
+cmd_test() {
+    cyan "Running Rust tests..."
+    cargo test -p lunk-core
+
+    echo
+    cyan "Running frontend checks..."
+    cd frontend && bun install --frozen-lockfile && bun run check && cd ..
+
+    echo
+    green "All tests passed."
+}
+
+# ---------------------------------------------------------------------------
+# check — lint (same as CI)
+# ---------------------------------------------------------------------------
+cmd_check() {
+    cyan "Clippy..."
+    cargo clippy --all-targets -- -D warnings
+
+    echo
+    cyan "Frontend check..."
+    cd frontend && bun run check && cd ..
+
+    echo
+    green "All checks passed."
+}
+
+# ---------------------------------------------------------------------------
+# db — database utilities
+# ---------------------------------------------------------------------------
+cmd_db() {
+    local sub="${1:-}"
+    shift 2>/dev/null || true
+
+    case "$sub" in
+        reset)
+            # Parse --profile flag
+            local profile="$LUNK_PROFILE"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --profile) profile="${2:-}"; shift 2 ;;
+                    --profile=*) profile="${1#--profile=}"; shift ;;
+                    *) red "Unknown flag: $1"; return 1 ;;
+                esac
+            done
+
+            # Resolve path for the target profile
+            local data_dir
+            if [[ -n "${LUNK_DATA_DIR:-}" ]]; then
+                data_dir="$LUNK_DATA_DIR"
+            else
+                local base="${XDG_DATA_HOME:-$HOME/.local/share}/lunk"
+                if [[ "$profile" == "default" ]]; then
+                    data_dir="$base"
+                else
+                    data_dir="$base/profiles/$profile"
+                fi
+            fi
+            local db_path="$data_dir/lunk.db"
+
+            # Safety check for production
+            if [[ "$profile" == "default" ]]; then
+                yellow "WARNING: This will delete your production database!"
+                yellow "  $db_path"
+                printf "  Type 'yes' to confirm: "
+                read -r confirm
+                if [[ "$confirm" != "yes" ]]; then
+                    echo "  Aborted."
+                    return 1
+                fi
+            fi
+
+            if [[ -f "$db_path" ]]; then
+                yellow "Deleting $db_path (and WAL/SHM)..."
+                rm -f "$db_path" "$db_path-wal" "$db_path-shm"
+                green "Database reset (profile: $profile). It will be recreated on next launch."
+            else
+                yellow "No database found at $db_path (profile: $profile)"
+            fi
+            ;;
+        path)
+            resolve_db_path
+            ;;
+        *)
+            echo "Usage: ./dev db <command>"
+            echo
+            echo "Commands:"
+            echo "  reset [--profile NAME]   Delete the database (confirms for production)"
+            echo "  path                     Print the database file path"
+            echo
+            echo "Current profile: $LUNK_PROFILE"
+            echo "Current db path: $(resolve_db_path)"
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# help
+# ---------------------------------------------------------------------------
+cmd_help() {
+    bold "lunk dev toolkit"
+    echo
+    echo "Usage: ./dev <command>"
+    echo
+    echo "Commands:"
+    echo "  doctor    Check and install prerequisites"
+    echo "  up        Start Tauri dev (frontend HMR + Rust rebuild)"
+    echo "  ext       Chrome extension setup instructions"
+    echo "  test      Run tests (cargo test + frontend check)"
+    echo "  check     Run lints (clippy + frontend check)"
+    echo "  db        Database utilities (reset, path)"
+    echo "  help      Show this help"
+    echo
+    echo "Environment:"
+    echo "  LUNK_PROFILE   Active profile (default: dev)"
+    echo "  LUNK_DATA_DIR  Override data directory"
+    echo
+    print_profile
+}
+
+# ---------------------------------------------------------------------------
+# dispatch
+# ---------------------------------------------------------------------------
+case "${1:-help}" in
+    doctor) cmd_doctor ;;
+    up)     cmd_up ;;
+    ext)    cmd_ext ;;
+    test)   cmd_test ;;
+    check)  cmd_check ;;
+    db)     shift; cmd_db "$@" ;;
+    help|--help|-h) cmd_help ;;
+    *)
+        red "Unknown command: $1"
+        echo
+        cmd_help
+        exit 1
+        ;;
+esac

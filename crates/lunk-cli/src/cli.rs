@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use lunk_core::config::Config;
+use lunk_core::config::{self, Config};
 use lunk_core::db;
 use lunk_core::errors::{LunkError, Result};
 use lunk_core::models::*;
@@ -268,7 +268,11 @@ pub async fn delete_entry(id: &str) -> Result<()> {
 }
 
 pub async fn serve(port: u16) -> Result<()> {
+    let profile = config::active_profile();
     let db_path = Config::db_path()?;
+    eprintln!("profile: {profile}");
+    eprintln!("database: {}", db_path.display());
+
     let conn = db::open_database(&db_path)?;
     let pool = db::create_pool(conn);
 

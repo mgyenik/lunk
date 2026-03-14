@@ -3,7 +3,7 @@ mod commands;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lunk_core::config::Config;
+use lunk_core::config::{self, Config};
 use lunk_core::db;
 use lunk_core::transport::SyncNode;
 use lunk_server::state::AppState;
@@ -23,9 +23,11 @@ pub fn run() {
         )
         .init();
 
+    let profile = config::active_profile();
     let config = Config::load().expect("failed to load config");
     let db_path = Config::db_path().expect("failed to resolve db path");
 
+    tracing::info!("profile: {profile}");
     tracing::info!("database: {}", db_path.display());
 
     let conn = db::open_database(&db_path).expect("failed to open database");
