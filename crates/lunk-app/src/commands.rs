@@ -21,7 +21,6 @@ pub struct ListResultResponse {
 
 #[derive(Deserialize)]
 pub struct ListParamsInput {
-    status: Option<String>,
     #[serde(rename = "contentType")]
     content_type: Option<String>,
     tag: Option<String>,
@@ -80,7 +79,6 @@ pub fn list_entries(
     params: ListParamsInput,
 ) -> Result<ListResultResponse, String> {
     let list_params = ListParams {
-        status: params.status.as_deref().and_then(EntryStatus::parse),
         content_type: params.content_type.as_deref().and_then(ContentType::parse),
         tag: params.tag,
         domain: params.domain,
@@ -90,27 +88,6 @@ pub fn list_entries(
     };
 
     let (entries, total) = with_db(&db, |conn| repo::list_entries(conn, &list_params))
-        .map_err(|e| e.to_string())?;
-
-    Ok(ListResultResponse { entries, total })
-}
-
-#[tauri::command]
-pub fn get_queue(
-    db: tauri::State<'_, DbPool>,
-    limit: Option<i64>,
-    offset: Option<i64>,
-) -> Result<ListResultResponse, String> {
-    let params = ListParams {
-        status: Some(EntryStatus::Unread),
-        sort: Some("created_at".to_string()),
-        order: Some("desc".to_string()),
-        limit: limit.or(Some(50)),
-        offset: offset.or(Some(0)),
-        ..Default::default()
-    };
-
-    let (entries, total) = with_db(&db, |conn| repo::list_entries(conn, &params))
         .map_err(|e| e.to_string())?;
 
     Ok(ListResultResponse { entries, total })
@@ -146,16 +123,24 @@ pub fn get_entry_content(
 }
 
 #[tauri::command]
-pub fn update_entry_status(
+pub fn update_entry_tags(
     db: tauri::State<'_, DbPool>,
     id: String,
-    status: String,
-) -> Result<(), String> {
+    tags: Vec<String>,
+) -> Result<Entry, String> {
     let uuid = uuid::Uuid::parse_str(&id).map_err(|e| format!("invalid id: {e}"))?;
-    let status = EntryStatus::parse(&status)
-        .ok_or_else(|| format!("invalid status: {status}"))?;
+    with_db(&db, |conn| repo::update_entry_tags(conn, &uuid, &tags))
+        .map_err(|e| e.to_string())
+}
 
-    with_db(&db, |conn| repo::update_entry_status(conn, &uuid, status))
+#[tauri::command]
+pub fn get_tag_suggestions(
+    db: tauri::State<'_, DbPool>,
+    domain: Option<String>,
+    title: Option<String>,
+) -> Result<TagSuggestions, String> {
+    let title = title.as_deref().unwrap_or("");
+    with_db(&db, |conn| repo::get_tag_suggestions(conn, domain.as_deref(), title))
         .map_err(|e| e.to_string())
 }
 
@@ -205,7 +190,6 @@ pub fn import_pdf(
         snapshot_html: None,
         readable_html: None,
         pdf_data: Some(pdf_data),
-        status: Some(EntryStatus::Unread),
         tags: None,
         source: SaveSource::Api,
     };

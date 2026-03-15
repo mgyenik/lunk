@@ -149,20 +149,25 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
             }
         }
 
-        "update_status" => {
+        "update_tags" => {
             let id = msg
                 .data
                 .as_ref()
                 .and_then(|d| d.get("id"))
                 .and_then(|v| v.as_str());
-            let status = msg
+            let tags = msg
                 .data
                 .as_ref()
-                .and_then(|d| d.get("status"))
-                .and_then(|v| v.as_str());
+                .and_then(|d| d.get("tags"))
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                });
 
-            match (id, status) {
-                (Some(id), Some(status)) => {
+            match (id, tags) {
+                (Some(id), Some(tags)) => {
                     let uuid = match uuid::Uuid::parse_str(id) {
                         Ok(u) => u,
                         Err(e) => {
@@ -174,21 +179,11 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
                             };
                         }
                     };
-                    let status = match EntryStatus::parse(status) {
-                        Some(s) => s,
-                        None => {
-                            return NativeResponse {
-                                success: false,
-                                data: None,
-                                error: Some(format!("invalid status: {status}")),
-                                ..Default::default()
-                            };
-                        }
-                    };
 
-                    match repo::update_entry_status(conn, &uuid, status) {
-                        Ok(()) => NativeResponse {
+                    match repo::update_entry_tags(conn, &uuid, &tags) {
+                        Ok(entry) => NativeResponse {
                             success: true,
+                            data: Some(serde_json::to_value(entry).unwrap()),
                             ..Default::default()
                         },
                         Err(e) => NativeResponse {
@@ -201,7 +196,34 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
                 _ => NativeResponse {
                     success: false,
                     data: None,
-                    error: Some("missing id or status".to_string()),
+                    error: Some("missing id or tags".to_string()),
+                    ..Default::default()
+                },
+            }
+        }
+
+        "get_tag_suggestions" => {
+            let domain = msg
+                .data
+                .as_ref()
+                .and_then(|d| d.get("domain"))
+                .and_then(|v| v.as_str());
+            let title = msg
+                .data
+                .as_ref()
+                .and_then(|d| d.get("title"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            match repo::get_tag_suggestions(conn, domain, title) {
+                Ok(suggestions) => NativeResponse {
+                    success: true,
+                    data: Some(serde_json::to_value(suggestions).unwrap()),
+                    ..Default::default()
+                },
+                Err(e) => NativeResponse {
+                    success: false,
+                    error: Some(e.to_string()),
                     ..Default::default()
                 },
             }
@@ -239,11 +261,6 @@ fn handle_save_entry(
         .and_then(|v| v.as_str())
         .unwrap_or("article");
     let content_type = ContentType::parse(content_type_str).unwrap_or(ContentType::Article);
-    let status_str = data
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unread");
-    let status = EntryStatus::parse(status_str);
 
     let snapshot_html = data
         .get("snapshot_html")
@@ -282,7 +299,6 @@ fn handle_save_entry(
         snapshot_html,
         readable_html,
         pdf_data,
-        status,
         tags,
         source: SaveSource::Extension,
     };

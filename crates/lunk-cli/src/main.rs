@@ -21,12 +21,9 @@ enum Commands {
     Save {
         /// URL to save
         url: String,
-        /// Mark as queued/unread (default)
-        #[arg(long)]
-        queue: bool,
-        /// Mark as already read
-        #[arg(long)]
-        read: bool,
+        /// Add "read-later" tag
+        #[arg(long, short = 'r')]
+        read_later: bool,
         /// Add tag(s)
         #[arg(long, short)]
         tag: Vec<String>,
@@ -58,15 +55,15 @@ enum Commands {
     },
     /// List saved entries
     List {
-        /// Filter by status (unread|read|archived)
-        #[arg(long)]
-        status: Option<String>,
         /// Filter by type (article|pdf)
         #[arg(long = "type")]
         content_type: Option<String>,
         /// Filter by tag
         #[arg(long)]
         tag: Option<String>,
+        /// Show only read-later entries (shorthand for --tag read-later)
+        #[arg(long)]
+        read_later: bool,
         /// Maximum results
         #[arg(long, default_value = "50")]
         limit: i64,
@@ -74,29 +71,15 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show read queue (unread entries)
-    Queue {
-        /// Maximum results
-        #[arg(long, default_value = "20")]
-        limit: i64,
-        /// Output as JSON
+    /// Add or remove tags on an entry
+    Tag {
+        /// Entry ID
+        id: String,
+        /// Tags to add
+        tags: Vec<String>,
+        /// Remove these tags instead of adding
         #[arg(long)]
-        json: bool,
-    },
-    /// Mark an entry as read
-    Read {
-        /// Entry ID
-        id: String,
-    },
-    /// Mark an entry as archived
-    Archive {
-        /// Entry ID
-        id: String,
-    },
-    /// Mark an entry as unread
-    Unread {
-        /// Entry ID
-        id: String,
+        remove: bool,
     },
     /// Delete an entry
     Delete {
@@ -108,9 +91,6 @@ enum Commands {
         /// Output file path (default: stdout)
         #[arg(long, short)]
         output: Option<String>,
-        /// Filter by status
-        #[arg(long)]
-        status: Option<String>,
         /// Include content (extracted_text, readable_html)
         #[arg(long)]
         with_content: bool,
@@ -183,9 +163,11 @@ async fn main() {
     }
 
     let result = match cli.command {
-        Some(Commands::Save { url, queue: _, read, tag }) => {
-            let status = if read { "read" } else { "unread" };
-            cli::save_url(&url, status, &tag).await
+        Some(Commands::Save { url, read_later, mut tag }) => {
+            if read_later && !tag.iter().any(|t| t == "read-later") {
+                tag.push("read-later".to_string());
+            }
+            cli::save_url(&url, &tag).await
         }
         Some(Commands::Import { path, title, tag }) => {
             cli::import_pdf(&path, title.as_deref(), &tag).await
@@ -194,18 +176,14 @@ async fn main() {
             let q = query.join(" ");
             cli::search(&q, limit, content_type.as_deref(), json).await
         }
-        Some(Commands::List { status, content_type, tag, limit, json }) => {
-            cli::list_entries(status.as_deref(), content_type.as_deref(), tag.as_deref(), limit, json).await
+        Some(Commands::List { content_type, tag, read_later, limit, json }) => {
+            let effective_tag = if read_later { Some("read-later") } else { tag.as_deref() };
+            cli::list_entries(content_type.as_deref(), effective_tag, limit, json).await
         }
-        Some(Commands::Queue { limit, json }) => {
-            cli::list_entries(Some("unread"), None, None, limit, json).await
-        }
-        Some(Commands::Read { id }) => cli::set_status(&id, "read").await,
-        Some(Commands::Archive { id }) => cli::set_status(&id, "archived").await,
-        Some(Commands::Unread { id }) => cli::set_status(&id, "unread").await,
+        Some(Commands::Tag { id, tags, remove }) => cli::tag_entry(&id, &tags, remove),
         Some(Commands::Delete { id }) => cli::delete_entry(&id).await,
-        Some(Commands::Export { output, status, with_content }) => {
-            cli::export(output.as_deref(), status.as_deref(), with_content)
+        Some(Commands::Export { output, with_content }) => {
+            cli::export(output.as_deref(), with_content)
         }
         Some(Commands::Serve { port }) => cli::serve(port).await,
         Some(Commands::Sync { command }) => {

@@ -57,10 +57,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::search_entries,
             commands::list_entries,
-            commands::get_queue,
             commands::get_entry,
             commands::get_entry_content,
-            commands::update_entry_status,
+            commands::update_entry_tags,
+            commands::get_tag_suggestions,
             commands::delete_entry,
             commands::get_tags,
             commands::import_pdf,

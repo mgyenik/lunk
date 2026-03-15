@@ -19,11 +19,10 @@ pub fn api_routes() -> Router<AppState> {
         .route("/entries/{id}", put(update_entry))
         .route("/entries/{id}", delete(delete_entry))
         .route("/entries/{id}/content", get(get_entry_content))
+        .route("/entries/{id}/tags", put(update_entry_tags))
         .route("/search", get(search_entries))
-        .route("/queue", get(get_queue))
-        .route("/queue/mark-read", post(mark_read))
-        .route("/queue/mark-archived", post(mark_archived))
         .route("/tags", get(get_tags))
+        .route("/tags/suggestions", get(get_tag_suggestions))
         .route("/sync/status", get(sync_status))
         .route("/sync/peers", get(list_sync_peers))
         .route("/sync/peers", post(add_sync_peer_handler))
@@ -43,7 +42,6 @@ struct CreateEntryBody {
     snapshot_html: Option<String>,   // base64
     readable_html: Option<String>,   // base64
     pdf_base64: Option<String>,
-    status: Option<String>,
     tags: Option<Vec<String>>,
     source: Option<String>,
 }
@@ -51,15 +49,16 @@ struct CreateEntryBody {
 #[derive(Deserialize)]
 struct UpdateEntryBody {
     title: Option<String>,
-    status: Option<String>,
     tags: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
+struct UpdateTagsBody {
+    tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
 struct ListQuery {
-    q: Option<String>,
-    status: Option<String>,
     content_type: Option<String>,
     tag: Option<String>,
     domain: Option<String>,
@@ -77,14 +76,9 @@ struct SearchQuery {
 }
 
 #[derive(Deserialize)]
-struct QueueQuery {
-    limit: Option<i64>,
-    offset: Option<i64>,
-}
-
-#[derive(Deserialize)]
-struct BatchIds {
-    ids: Vec<String>,
+struct TagSuggestionsQuery {
+    domain: Option<String>,
+    title: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -147,11 +141,6 @@ async fn create_entry(
     let content_type = ContentType::parse(&body.content_type)
         .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("invalid content_type: {}", body.content_type)))?;
 
-    let status = body.status.as_deref()
-        .map(|s| EntryStatus::parse(s)
-            .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("invalid status: {s}"))))
-        .transpose()?;
-
     let source = match body.source.as_deref() {
         Some("extension") => SaveSource::Extension,
         Some("cli") => SaveSource::Cli,
@@ -169,7 +158,6 @@ async fn create_entry(
             .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid readable_html base64: {e}")))?,
         pdf_data: body.pdf_base64.map(|s| engine.decode(s)).transpose()
             .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid pdf_base64: {e}")))?,
-        status,
         tags: body.tags,
         source,
     };
@@ -236,7 +224,6 @@ async fn list_entries(
     let offset = query.offset.unwrap_or(0);
 
     let params = ListParams {
-        status: query.status.as_deref().and_then(EntryStatus::parse),
         content_type: query.content_type.as_deref().and_then(ContentType::parse),
         tag: query.tag,
         domain: query.domain,
@@ -274,13 +261,23 @@ async fn update_entry(
     let uuid = uuid::Uuid::parse_str(&id)
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
 
-    let status = body.status.as_deref()
-        .map(|s| EntryStatus::parse(s)
-            .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("invalid status: {s}"))))
-        .transpose()?;
+    let entry = with_db(&state.db, |conn| {
+        repo::update_entry(conn, &uuid, body.title.as_deref(), body.tags.as_deref())
+    })?;
+
+    Ok(Json(entry))
+}
+
+async fn update_entry_tags(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateTagsBody>,
+) -> ApiResult<Json<Entry>> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
 
     let entry = with_db(&state.db, |conn| {
-        repo::update_entry(conn, &uuid, body.title.as_deref(), status, body.tags.as_deref())
+        repo::update_entry_tags(conn, &uuid, &body.tags)
     })?;
 
     Ok(Json(entry))
@@ -328,67 +325,22 @@ async fn search_entries(
     Ok(Json(results))
 }
 
-async fn get_queue(
-    State(state): State<AppState>,
-    Query(query): Query<QueueQuery>,
-) -> ApiResult<Json<ListResponse>> {
-    let limit = query.limit.unwrap_or(50);
-    let offset = query.offset.unwrap_or(0);
-
-    let params = ListParams {
-        status: Some(EntryStatus::Unread),
-        sort: Some("created_at".to_string()),
-        order: Some("desc".to_string()),
-        limit: Some(limit),
-        offset: Some(offset),
-        ..Default::default()
-    };
-
-    let (entries, total) = with_db(&state.db, |conn| repo::list_entries(conn, &params))?;
-
-    Ok(Json(ListResponse {
-        entries,
-        total,
-        offset,
-        limit,
-    }))
-}
-
-async fn mark_read(
-    State(state): State<AppState>,
-    Json(body): Json<BatchIds>,
-) -> ApiResult<StatusCode> {
-    with_db(&state.db, |conn| {
-        for id_str in &body.ids {
-            let uuid = uuid::Uuid::parse_str(id_str)
-                .map_err(|e| lunk_core::errors::LunkError::InvalidInput(format!("invalid id: {e}")))?;
-            repo::update_entry_status(conn, &uuid, EntryStatus::Read)?;
-        }
-        Ok(())
-    })?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn mark_archived(
-    State(state): State<AppState>,
-    Json(body): Json<BatchIds>,
-) -> ApiResult<StatusCode> {
-    with_db(&state.db, |conn| {
-        for id_str in &body.ids {
-            let uuid = uuid::Uuid::parse_str(id_str)
-                .map_err(|e| lunk_core::errors::LunkError::InvalidInput(format!("invalid id: {e}")))?;
-            repo::update_entry_status(conn, &uuid, EntryStatus::Archived)?;
-        }
-        Ok(())
-    })?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 async fn get_tags(
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<TagWithCount>>> {
     let tags = with_db(&state.db, repo::get_tags)?;
     Ok(Json(tags))
+}
+
+async fn get_tag_suggestions(
+    State(state): State<AppState>,
+    Query(query): Query<TagSuggestionsQuery>,
+) -> ApiResult<Json<TagSuggestions>> {
+    let title = query.title.as_deref().unwrap_or("");
+    let suggestions = with_db(&state.db, |conn| {
+        repo::get_tag_suggestions(conn, query.domain.as_deref(), title)
+    })?;
+    Ok(Json(suggestions))
 }
 
 async fn health() -> Json<HealthResponse> {

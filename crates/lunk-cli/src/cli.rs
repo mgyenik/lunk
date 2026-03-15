@@ -15,7 +15,7 @@ fn open_db() -> Result<rusqlite::Connection> {
     db::open_database(&db_path)
 }
 
-pub async fn save_url(url: &str, status: &str, tags: &[String]) -> Result<()> {
+pub async fn save_url(url: &str, tags: &[String]) -> Result<()> {
     // Validate URL
     let parsed = url::Url::parse(url)?;
     println!("Fetching {}...", parsed.as_str());
@@ -49,9 +49,6 @@ pub async fn save_url(url: &str, status: &str, tags: &[String]) -> Result<()> {
         return Err(LunkError::Other("could not extract any text from the page".to_string()));
     }
 
-    let entry_status = EntryStatus::parse(status)
-        .ok_or_else(|| LunkError::InvalidInput(format!("invalid status: {status}")))?;
-
     let conn = open_db()?;
 
     // Check for duplicates
@@ -76,7 +73,6 @@ pub async fn save_url(url: &str, status: &str, tags: &[String]) -> Result<()> {
         snapshot_html: None, // CLI doesn't capture visual snapshots
         readable_html,
         pdf_data: None,
-        status: Some(entry_status),
         tags: if tags.is_empty() { None } else { Some(tags.to_vec()) },
         source: SaveSource::Cli,
     };
@@ -128,7 +124,6 @@ pub async fn import_pdf(path: &str, title: Option<&str>, tags: &[String]) -> Res
         snapshot_html: None,
         readable_html: None,
         pdf_data: Some(pdf_data),
-        status: Some(EntryStatus::Unread),
         tags: if tags.is_empty() { None } else { Some(tags.to_vec()) },
         source: SaveSource::Cli,
     };
@@ -160,14 +155,16 @@ pub async fn search(query: &str, limit: i64, _content_type: Option<&str>, json: 
             ContentType::Article => "article",
             ContentType::Pdf => "pdf",
         };
-        let status_badge = e.status.as_str();
 
         print!("  [{}] ", &e.id.to_string()[..8]);
-        print!("[{type_badge}] [{status_badge}] ");
+        print!("[{type_badge}] ");
         println!("{}", e.title);
 
         if let Some(url) = &e.url {
             println!("    {url}");
+        }
+        if !e.tags.is_empty() {
+            println!("    tags: {}", e.tags.join(", "));
         }
         if let Some(snippet) = &hit.snippet {
             // Strip HTML tags from snippet for terminal display
@@ -189,7 +186,6 @@ pub async fn search(query: &str, limit: i64, _content_type: Option<&str>, json: 
 }
 
 pub async fn list_entries(
-    status: Option<&str>,
     content_type: Option<&str>,
     tag: Option<&str>,
     limit: i64,
@@ -198,7 +194,6 @@ pub async fn list_entries(
     let conn = open_db()?;
 
     let params = ListParams {
-        status: status.and_then(EntryStatus::parse),
         content_type: content_type.and_then(ContentType::parse),
         tag: tag.map(|s| s.to_string()),
         limit: Some(limit),
@@ -224,10 +219,9 @@ pub async fn list_entries(
             ContentType::Article => "article",
             ContentType::Pdf => "pdf",
         };
-        let status_badge = e.status.as_str();
 
         print!("  [{}] ", &e.id.to_string()[..8]);
-        print!("[{type_badge}] [{status_badge}] ");
+        print!("[{type_badge}] ");
         println!("{}", e.title);
 
         if let Some(url) = &e.url {
@@ -254,15 +248,31 @@ pub async fn list_entries(
     Ok(())
 }
 
-pub async fn set_status(id: &str, status: &str) -> Result<()> {
+pub fn tag_entry(id: &str, tags: &[String], remove: bool) -> Result<()> {
     let conn = open_db()?;
     let uuid = uuid::Uuid::parse_str(id)
         .map_err(|e| LunkError::InvalidInput(format!("invalid id: {e}")))?;
-    let status = EntryStatus::parse(status)
-        .ok_or_else(|| LunkError::InvalidInput(format!("invalid status: {status}")))?;
 
-    repo::update_entry_status(&conn, &uuid, status)?;
-    println!("Updated entry {} to {}", &id[..8.min(id.len())], status.as_str());
+    let entry = repo::get_entry(&conn, &uuid)?;
+    let mut current_tags = entry.tags;
+
+    if remove {
+        current_tags.retain(|t| !tags.contains(t));
+    } else {
+        for tag in tags {
+            if !current_tags.contains(tag) {
+                current_tags.push(tag.clone());
+            }
+        }
+    }
+
+    let entry = repo::update_entry_tags(&conn, &uuid, &current_tags)?;
+    let short = &id[..8.min(id.len())];
+    if entry.tags.is_empty() {
+        println!("Entry {short}: no tags");
+    } else {
+        println!("Entry {short}: {}", entry.tags.join(", "));
+    }
     Ok(())
 }
 
@@ -335,11 +345,10 @@ pub fn install_native_messaging(extension_id: &str, browser: &str) -> Result<()>
     Ok(())
 }
 
-pub fn export(output: Option<&str>, status: Option<&str>, with_content: bool) -> Result<()> {
+pub fn export(output: Option<&str>, with_content: bool) -> Result<()> {
     let conn = open_db()?;
 
     let params = ListParams {
-        status: status.and_then(EntryStatus::parse),
         limit: Some(10_000),
         ..Default::default()
     };
