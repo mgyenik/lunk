@@ -183,13 +183,28 @@
         // Deduplication
         groupDuplicateImages: true,
 
-        // Resource limits
-        maxResourceSizeEnabled: false,
+        // Resource limits — cap individual resources at 5MB to keep
+        // total snapshot size reasonable (images are the main culprit)
+        maxResourceSizeEnabled: true,
+        maxResourceSize: 5,
       },
       { fetch: bgFetch, frameFetch: bgFetch }
     );
 
-    return pageData.content;
+    let html = pageData.content;
+
+    // Deduplicate <style> tags — web component frameworks (Reddit, etc.)
+    // inject identical stylesheets hundreds of times.
+    const seen = new Set();
+    html = html.replace(/<style[\s\S]*?<\/style>/g, (match) => {
+      if (seen.has(match)) return "";
+      seen.add(match);
+      return match;
+    });
+
+    console.log(`Lunk: snapshot size: ${html.length} bytes (${Math.round(html.length/1024)}KB)`);
+
+    return html;
   }
 
   // --- PDF handling ---

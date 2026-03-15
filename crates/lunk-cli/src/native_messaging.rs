@@ -202,6 +202,71 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
             }
         }
 
+        "update_snapshot" => {
+            use base64::Engine;
+            let engine = base64::engine::general_purpose::STANDARD;
+
+            let data = msg.data.as_ref().unwrap();
+            let id_str = data.get("id").and_then(|v| v.as_str());
+            let snapshot_b64 = data.get("snapshot_html").and_then(|v| v.as_str());
+
+            match (id_str, snapshot_b64) {
+                (Some(id_str), Some(snapshot_b64)) => {
+                    let uuid = match uuid::Uuid::parse_str(id_str) {
+                        Ok(u) => u,
+                        Err(e) => {
+                            return NativeResponse {
+                                success: false,
+                                error: Some(format!("invalid id: {e}")),
+                                ..Default::default()
+                            };
+                        }
+                    };
+
+                    let snapshot = match engine.decode(snapshot_b64) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            return NativeResponse {
+                                success: false,
+                                error: Some(format!("invalid base64: {e}")),
+                                ..Default::default()
+                            };
+                        }
+                    };
+
+                    let extracted_text = data.get("extracted_text").and_then(|v| v.as_str());
+                    let readable_html = data
+                        .get("readable_html")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| engine.decode(s).ok());
+
+                    match repo::update_entry_content(
+                        conn,
+                        &uuid,
+                        extracted_text,
+                        Some(&snapshot),
+                        readable_html.as_deref(),
+                    ) {
+                        Ok(()) => NativeResponse {
+                            success: true,
+                            data: Some(serde_json::json!({ "ok": true })),
+                            ..Default::default()
+                        },
+                        Err(e) => NativeResponse {
+                            success: false,
+                            error: Some(e.to_string()),
+                            ..Default::default()
+                        },
+                    }
+                }
+                _ => NativeResponse {
+                    success: false,
+                    error: Some("missing id or snapshot_html".to_string()),
+                    ..Default::default()
+                },
+            }
+        }
+
         "get_tag_suggestions" => {
             let domain = msg
                 .data

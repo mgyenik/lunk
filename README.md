@@ -1,6 +1,6 @@
 # Lunk
 
-Personal link indexing and archive system. Save web pages and PDFs with full visual snapshots, search them with full-text search, manage a read queue, and sync across devices via P2P.
+Personal link indexing and archive system. Save web pages and PDFs with full visual snapshots, search them with full-text search, organize with tags, and sync across devices via P2P.
 
 Local-first. No cloud accounts, no servers. Your data stays on your machine.
 
@@ -77,26 +77,31 @@ extension/         Chrome extension (Manifest V3)
 ```bash
 # Save a URL
 lunk save https://example.com
-lunk save https://example.com --read --tag rust --tag async
+lunk save https://example.com --read-later --tag rust --tag async
 
 # Import a local PDF
 lunk import paper.pdf
 lunk import paper.pdf --title "My Paper" --tag research
 
-# Search
+# Search (auto-prefix matching on last term)
 lunk search "full text query"
 lunk search neural network --type pdf --limit 10 --json
 
 # List / filter
 lunk list
-lunk list --status unread --type article --tag rust
-lunk queue                      # shorthand for --status unread
+lunk list --type article --tag rust
+lunk list --read-later                # shorthand for --tag read-later
 
-# Change status
-lunk read <ID>
-lunk archive <ID>
-lunk unread <ID>
+# Manage tags
+lunk tag <ID> rust async              # add tags
+lunk tag <ID> --remove draft          # remove tags
+
+# Delete
 lunk delete <ID>
+
+# Transfer entries between profiles
+lunk transfer --from dev              # import from dev profile into current
+lunk transfer --from /path/to/other.db
 
 # Export
 lunk export -o backup.json --with-content
@@ -116,6 +121,9 @@ lunk migrate-status
 # Rebuild full-text search index
 ./dev db rebuild-fts
 lunk rebuild-fts
+
+# Re-extract text from PDFs missing extracted text
+lunk backfill-pdfs
 
 # Print database path
 ./dev db path
@@ -143,21 +151,32 @@ LUNK_PROFILE=staging lunk serve
 
 # Override data directory entirely
 LUNK_DATA_DIR=/tmp/lunk-test lunk serve
+
+# Transfer entries between profiles
+lunk transfer --from dev              # import dev entries into current profile
+LUNK_PROFILE=default lunk transfer --from dev
 ```
 
 ### Chrome Extension
 
-1. Open `chrome://extensions`
-2. Enable **Developer mode**
-3. Click **Load unpacked** and select the `extension/` directory
-4. Register native messaging:
+1. Build the extension dependencies:
+   ```bash
+   cd extension && bun install && bun run build && cd ..
+   ```
+2. Open `chrome://extensions`
+3. Enable **Developer mode**
+4. Click **Load unpacked** and select the `extension/` directory
+5. Register native messaging:
    ```bash
    lunk install-native-messaging --extension-id <ID_FROM_CHROME>
    ```
+6. (Optional) Enable **Allow access to file URLs** in the extension details to save local PDFs
 
-**Keyboard shortcuts:** `Alt+S` save current page, `Alt+Q` queue current page.
+**Keyboard shortcuts:** `Alt+S` save current page, `Alt+Q` save as read-later.
 
-The unpacked extension auto-detects the dev API port (9724). Installed extensions use production (9723). Falls back to HTTP if native messaging is unavailable.
+The extension uses SingleFile for archive-quality page snapshots (CSS, images, fonts, iframes all inlined). It falls back from native messaging to the HTTP API automatically.
+
+The unpacked extension auto-detects the dev API port (9724). Installed extensions use production (9723).
 
 ### P2P Sync
 
@@ -192,18 +211,26 @@ curl "localhost:9723/api/v1/search?q=rust&limit=10"
 # Save an article
 curl -X POST localhost:9723/api/v1/entries \
   -H 'Content-Type: application/json' \
-  -d '{"url":"https://example.com","title":"Example","content_type":"article","extracted_text":"..."}'
+  -d '{"url":"https://example.com","title":"Example","content_type":"article","extracted_text":"...","tags":["rust"]}'
 
 # List entries
-curl "localhost:9723/api/v1/entries?status=unread&content_type=article"
+curl "localhost:9723/api/v1/entries?content_type=article&tag=rust"
 
 # Get entry content
 curl localhost:9723/api/v1/entries/<ID>/content
 
-# Batch mark as read
-curl -X POST localhost:9723/api/v1/queue/mark-read \
+# Update tags
+curl -X PUT localhost:9723/api/v1/entries/<ID>/tags \
   -H 'Content-Type: application/json' \
-  -d '{"ids":["<ID1>","<ID2>"]}'
+  -d '{"tags":["rust","async"]}'
+
+# Get tag suggestions
+curl "localhost:9723/api/v1/tags/suggestions?domain=arxiv.org&title=neural+networks"
+
+# Update snapshot (base64 HTML)
+curl -X PUT localhost:9723/api/v1/entries/<ID>/snapshot \
+  -H 'Content-Type: application/json' \
+  -d '{"snapshot_html":"<base64>"}'
 ```
 
 <details>
@@ -213,16 +240,16 @@ curl -X POST localhost:9723/api/v1/queue/mark-read \
 |--------|----------|-------------|
 | GET | `/health` | Health check |
 | POST | `/entries` | Create entry |
-| GET | `/entries` | List entries (filters: `status`, `content_type`, `tag`, `domain`, `q`) |
+| GET | `/entries` | List entries (filters: `content_type`, `tag`, `domain`, `limit`, `offset`) |
 | GET | `/entries/:id` | Get entry metadata |
-| PUT | `/entries/:id` | Update entry |
+| PUT | `/entries/:id` | Update entry (title, tags) |
 | DELETE | `/entries/:id` | Delete entry |
 | GET | `/entries/:id/content` | Get content (text, HTML, or PDF) |
+| PUT | `/entries/:id/tags` | Replace tags |
+| PUT | `/entries/:id/snapshot` | Update snapshot HTML |
 | GET | `/search` | Full-text search (`q`, `limit`, `offset`) |
-| GET | `/queue` | Read queue (unread entries) |
-| POST | `/queue/mark-read` | Batch mark read |
-| POST | `/queue/mark-archived` | Batch mark archived |
 | GET | `/tags` | List tags with counts |
+| GET | `/tags/suggestions` | Tag suggestions (`domain`, `title`) |
 | GET | `/sync/status` | Sync status |
 | GET | `/sync/peers` | List peers |
 | POST | `/sync/peers` | Add peer |
@@ -254,8 +281,8 @@ lunk rebuild-fts
 
 **Releases** are triggered by pushing a `v*` tag:
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 This builds CLI binaries (Linux, Windows, macOS x86_64 + ARM64), Tauri desktop apps (.deb, .AppImage, .msi, .exe), and the Chrome extension zip, then publishes a GitHub Release.
@@ -281,3 +308,5 @@ level = "info"
 ## License
 
 MIT
+
+Note: The extension uses [SingleFile](https://github.com/nicelvn-io/single-file-core) (AGPL-3.0) for page archiving. SingleFile's bundled output is included in `extension/lib/` and can be rebuilt with `cd extension && bun run build`.

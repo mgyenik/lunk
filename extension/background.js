@@ -68,8 +68,11 @@ function sendNativeMessage(action, data) {
     pendingRequests.set(requestId, { resolve, reject, timeout: timeoutHandle, action, data });
 
     try {
+      const msgSize = JSON.stringify({ action, data, _requestId: requestId }).length;
+      console.log(`Lunk: sending native message: action=${action}, size=${Math.round(msgSize/1024)}KB`);
       port.postMessage({ action, data, _requestId: requestId });
     } catch (err) {
+      console.warn(`Lunk: native message failed (${err.message}), falling back to HTTP`);
       clearTimeout(timeoutHandle);
       pendingRequests.delete(requestId);
       // Fallback to HTTP
@@ -123,6 +126,7 @@ async function resolveApiBase() {
 
 async function sendHttpMessage(action, data) {
   try {
+    console.log(`Lunk: HTTP fallback for action=${action}`);
     const API_BASE = await resolveApiBase();
     switch (action) {
       case "save_entry": {
@@ -153,13 +157,19 @@ async function sendHttpMessage(action, data) {
           body.pdf_base64 = data.pdf_base64;
         }
 
+        const bodyJson = JSON.stringify(body);
+        console.log(`Lunk: POST /entries payload size: ${Math.round(bodyJson.length/1024)}KB`);
         const resp = await fetch(`${API_BASE}/entries`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: bodyJson,
         });
 
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => "");
+          console.error(`Lunk: POST /entries failed: HTTP ${resp.status}`, errText);
+          throw new Error(`HTTP ${resp.status}`);
+        }
         const entry = await resp.json();
         return { success: true, data: entry };
       }
@@ -201,6 +211,22 @@ async function sendHttpMessage(action, data) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const entry = await resp.json();
         return { success: true, data: entry };
+      }
+
+      case "update_snapshot": {
+        const body = {
+          snapshot_html: data.snapshot_html,
+        };
+        if (data.extracted_text) body.extracted_text = data.extracted_text;
+        if (data.readable_html) body.readable_html = data.readable_html;
+        const resp = await fetch(`${API_BASE}/entries/${data.id}/snapshot`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const result = await resp.json();
+        return { success: true, data: result };
       }
 
       case "ping": {
@@ -289,6 +315,7 @@ async function savePage(tabId, tags = []) {
   await ensureContentScript(tabId);
 
   // Send extraction request to content script
+  console.log("Lunk: extracting page content...");
   const result = await chrome.tabs.sendMessage(tabId, {
     action: "extract",
     options: {},
@@ -297,6 +324,20 @@ async function savePage(tabId, tags = []) {
   if (result?.error) {
     throw new Error(result.error);
   }
+
+  // Log payload sizes for debugging
+  const sizes = {
+    url: result.url?.length || 0,
+    title: result.title?.length || 0,
+    extracted_text: result.extracted_text?.length || 0,
+    readable_html: result.readable_html?.length || 0,
+    snapshot_html: result.snapshot_html?.length || 0,
+    pdf_base64: result.pdf_base64?.length || 0,
+    content_type: result.content_type,
+  };
+  console.log("Lunk: extraction result sizes:", sizes);
+  const totalKB = Object.values(sizes).reduce((sum, v) => sum + (typeof v === "number" ? v : 0), 0) / 1024;
+  console.log(`Lunk: total payload ~${Math.round(totalKB)}KB (${Math.round(totalKB/1024)}MB)`);
 
   // If content script couldn't fetch the PDF (e.g. file:// URL),
   // try fetching from the background service worker
@@ -420,6 +461,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     }
 
+    case "update_snapshot": {
+      sendNativeMessage("update_snapshot", msg.data || {})
+        .then((resp) => sendResponse(resp))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+
+    case "rearchive": {
+      // Re-archive an existing entry: open its URL, capture with SingleFile,
+      // and update the stored snapshot
+      rearchiveEntry(msg.data)
+        .then((resp) => sendResponse(resp))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+
     case "fetch_resource": {
       // Cross-origin fetch fallback for SingleFile: content script can't fetch
       // some resources due to CORS, so we fetch them here (service worker has
@@ -431,6 +488,66 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
   }
 });
+
+// --- Re-archive ---
+
+async function rearchiveEntry({ id, url }) {
+  if (!id || !url) throw new Error("missing id or url");
+
+  // Open the URL in a background tab
+  const tab = await chrome.tabs.create({ url, active: false });
+
+  try {
+    // Wait for the page to load
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("page load timeout")), 30000);
+      function listener(tabId, info) {
+        if (tabId === tab.id && info.status === "complete") {
+          chrome.tabs.onUpdated.removeListener(listener);
+          clearTimeout(timeout);
+          resolve();
+        }
+      }
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+
+    // Give lazy-loaded content a moment to settle
+    await new Promise(r => setTimeout(r, 2000));
+
+    // Inject content scripts and capture
+    await ensureContentScript(tab.id);
+    const result = await chrome.tabs.sendMessage(tab.id, {
+      action: "extract",
+      options: {},
+    });
+
+    if (result?.error) throw new Error(result.error);
+
+    // Encode snapshot as base64 for storage
+    const snapshotBytes = new TextEncoder().encode(result.snapshot_html || "");
+    const snapshotB64 = arrayBufferToBase64(snapshotBytes.buffer);
+
+    const updateData = {
+      id,
+      snapshot_html: snapshotB64,
+    };
+    if (result.extracted_text) {
+      updateData.extracted_text = result.extracted_text;
+    }
+    if (result.readable_html) {
+      const readableBytes = new TextEncoder().encode(result.readable_html);
+      updateData.readable_html = arrayBufferToBase64(readableBytes.buffer);
+    }
+
+    const resp = await sendNativeMessage("update_snapshot", updateData);
+    if (!resp.success) throw new Error(resp.error || "update failed");
+
+    return { success: true, data: { id } };
+  } finally {
+    // Clean up the tab
+    try { await chrome.tabs.remove(tab.id); } catch { /* tab may already be closed */ }
+  }
+}
 
 // --- Resource Fetch (for SingleFile cross-origin) ---
 

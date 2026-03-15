@@ -19,7 +19,7 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .nest("/api/v1", api)
-        .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50MB — snapshots with inlined images can be large
+        .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100MB — SingleFile snapshots with inlined images + base64 overhead
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

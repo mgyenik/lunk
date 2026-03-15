@@ -361,6 +361,54 @@ pub fn update_entry_tags(conn: &Connection, id: &Uuid, tags: &[String]) -> Resul
     get_entry(conn, id)
 }
 
+/// Update the content blobs for an entry (text, snapshot, readable html).
+/// Only non-None fields are updated.
+pub fn update_entry_content(
+    conn: &Connection,
+    id: &Uuid,
+    extracted_text: Option<&str>,
+    snapshot_html: Option<&[u8]>,
+    readable_html: Option<&[u8]>,
+) -> Result<()> {
+    let now = Utc::now();
+    let id_str = id.to_string();
+
+    if let Some(text) = extracted_text {
+        conn.execute(
+            "UPDATE entry_content SET extracted_text = ?1 WHERE entry_id = ?2",
+            params![text, id_str],
+        )?;
+        // Update word count on the entry
+        let wc = text.split_whitespace().count() as i64;
+        conn.execute(
+            "UPDATE entries SET word_count = ?1 WHERE id = ?2",
+            params![wc, id_str],
+        )?;
+    }
+    if let Some(html) = snapshot_html {
+        conn.execute(
+            "UPDATE entry_content SET snapshot_html = ?1 WHERE entry_id = ?2",
+            params![html, id_str],
+        )?;
+    }
+    if let Some(html) = readable_html {
+        conn.execute(
+            "UPDATE entry_content SET readable_html = ?1 WHERE entry_id = ?2",
+            params![html, id_str],
+        )?;
+    }
+
+    conn.execute(
+        "UPDATE entries SET updated_at = ?1 WHERE id = ?2",
+        params![now.to_rfc3339(), id_str],
+    )?;
+
+    // Rebuild FTS for this entry
+    crate::search::rebuild_fts_for_entry(conn, id)?;
+
+    Ok(())
+}
+
 pub fn delete_entry(conn: &Connection, id: &Uuid) -> Result<()> {
     // entry_content, pdf_pages, entry_tags cleaned up by ON DELETE CASCADE
     let changed = conn.execute(

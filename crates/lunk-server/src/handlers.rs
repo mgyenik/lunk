@@ -20,6 +20,7 @@ pub fn api_routes() -> Router<AppState> {
         .route("/entries/{id}", delete(delete_entry))
         .route("/entries/{id}/content", get(get_entry_content))
         .route("/entries/{id}/tags", put(update_entry_tags))
+        .route("/entries/{id}/snapshot", put(update_entry_snapshot))
         .route("/search", get(search_entries))
         .route("/tags", get(get_tags))
         .route("/tags/suggestions", get(get_tag_suggestions))
@@ -55,6 +56,13 @@ struct UpdateEntryBody {
 #[derive(Deserialize)]
 struct UpdateTagsBody {
     tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateSnapshotBody {
+    snapshot_html: String,        // base64
+    extracted_text: Option<String>,
+    readable_html: Option<String>, // base64
 }
 
 #[derive(Deserialize)]
@@ -290,6 +298,41 @@ async fn update_entry_tags(
     })?;
 
     Ok(Json(entry))
+}
+
+/// Update the snapshot HTML for an entry (used by extension re-archive).
+async fn update_entry_snapshot(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateSnapshotBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
+
+    let snapshot = engine.decode(&body.snapshot_html)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid base64: {e}")))?;
+
+    let extracted_text = body.extracted_text.as_deref();
+    let readable_html = body.readable_html
+        .as_ref()
+        .map(|s| engine.decode(s))
+        .transpose()
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid readable_html base64: {e}")))?;
+
+    with_db(&state.db, |conn| {
+        repo::update_entry_content(
+            conn,
+            &uuid,
+            extracted_text,
+            Some(&snapshot),
+            readable_html.as_deref(),
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn delete_entry(
