@@ -190,6 +190,14 @@ async fn create_entry(
         let pages = lunk_core::pdf::extract_pages(pdf_data);
         let full_text: String = pages.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n\n");
 
+        if pages.is_empty() {
+            tracing::warn!(
+                url = ?req.url,
+                title = %req.title,
+                "PDF text extraction failed — entry will be saved but not searchable"
+            );
+        }
+
         // Use URL filename as title if title is empty
         let mut req = req;
         if req.title.is_empty() {

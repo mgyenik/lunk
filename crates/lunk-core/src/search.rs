@@ -34,7 +34,8 @@ pub fn search(
     // Main search query with snippets
     let mut stmt = conn.prepare(
         "SELECT e.id, e.url, e.title, e.content_type, e.status, e.domain,
-                e.word_count, e.page_count, e.created_at, e.updated_at, e.saved_by,
+                e.word_count, e.page_count, e.index_status, e.index_version,
+                e.created_at, e.updated_at, e.saved_by,
                 snippet(entries_fts, 1, '<mark>', '</mark>', '...', 40) as snippet
          FROM entries_fts
          JOIN entries e ON e.rowid = entries_fts.rowid
@@ -54,10 +55,12 @@ pub fn search(
                 domain: row.get(5)?,
                 word_count: row.get(6)?,
                 page_count: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
-                saved_by: row.get(10)?,
-                snippet: row.get(11)?,
+                index_status: row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "ok".to_string()),
+                index_version: row.get::<_, Option<i32>>(9)?.unwrap_or(0),
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+                saved_by: row.get(12)?,
+                snippet: row.get(13)?,
             },
         ))
     })?;
@@ -73,6 +76,8 @@ pub fn search(
             .ok_or_else(|| LunkError::Other(format!("invalid content_type: {}", row.content_type)))?;
         let status = EntryStatus::parse(&row.status)
             .ok_or_else(|| LunkError::Other(format!("invalid status: {}", row.status)))?;
+        let index_status = IndexStatus::parse(&row.index_status)
+            .unwrap_or(IndexStatus::Ok);
         let created_at = chrono::DateTime::parse_from_rfc3339(&row.created_at)
             .map_err(|e| LunkError::Other(format!("invalid timestamp: {e}")))?
             .with_timezone(&chrono::Utc);
@@ -97,6 +102,8 @@ pub fn search(
                 domain: row.domain,
                 word_count: row.word_count,
                 page_count: row.page_count,
+                index_status,
+                index_version: row.index_version,
                 created_at,
                 updated_at,
                 saved_by: row.saved_by,
@@ -219,6 +226,8 @@ struct EntryRowWithSnippet {
     domain: Option<String>,
     word_count: Option<i64>,
     page_count: Option<i64>,
+    index_status: String,
+    index_version: i32,
     created_at: String,
     updated_at: String,
     saved_by: String,

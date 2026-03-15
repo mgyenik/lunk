@@ -1,5 +1,11 @@
 use lopdf::Document;
 
+/// Current version of the processing/indexing pipeline.
+/// Bump this when the extraction logic changes materially (new library,
+/// new fields extracted, OCR added, etc.). Entries with index_version
+/// below this value are candidates for reindexing.
+pub const INDEX_VERSION: i32 = 1;
+
 /// Extract text from a PDF byte slice, returning (page_number, text) pairs.
 /// Page numbers are 1-indexed. Pages with no extractable text are omitted.
 pub fn extract_pages(data: &[u8]) -> Vec<(i32, String)> {

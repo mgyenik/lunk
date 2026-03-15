@@ -71,6 +71,40 @@ impl SaveSource {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexStatus {
+    /// Text extracted and FTS indexed successfully.
+    Ok,
+    /// Extraction partially succeeded (some pages failed, or less content than expected).
+    Partial,
+    /// Extraction attempted but produced no usable text.
+    Failed,
+    /// Not yet processed (awaiting backfill or reindex).
+    Pending,
+}
+
+impl IndexStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IndexStatus::Ok => "ok",
+            IndexStatus::Partial => "partial",
+            IndexStatus::Failed => "failed",
+            IndexStatus::Pending => "pending",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "ok" => Some(IndexStatus::Ok),
+            "partial" => Some(IndexStatus::Partial),
+            "failed" => Some(IndexStatus::Failed),
+            "pending" => Some(IndexStatus::Pending),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub id: Uuid,
@@ -81,6 +115,8 @@ pub struct Entry {
     pub domain: Option<String>,
     pub word_count: Option<i64>,
     pub page_count: Option<i64>,
+    pub index_status: IndexStatus,
+    pub index_version: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub saved_by: String,

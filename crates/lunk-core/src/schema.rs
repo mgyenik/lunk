@@ -3,7 +3,7 @@ use rusqlite::{params, Connection};
 use crate::errors::Result;
 
 /// Current schema version. Bump this when adding a new migration.
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
 
 /// A schema migration: version number, human description, and migration function.
 struct Migration {
@@ -30,13 +30,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Initial schema: entries, content, FTS5, tags, sync peers",
         up: migrate_v1,
     },
-    // Example of a future migration:
-    //
-    // Migration {
-    //     version: 2,
-    //     description: "Add description column with backfill from readable_html",
-    //     up: migrate_v2,
-    // },
+    Migration {
+        version: 2,
+        description: "Add index_status and index_version columns for extraction tracking",
+        up: migrate_v2,
+    },
 ];
 
 /// Run all pending migrations. Called on every database open.
@@ -293,35 +291,48 @@ fn migrate_v1(conn: &Connection) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Example: Migration v2 (commented out — shows the pattern for future use)
+// Migration v2: Index status + version tracking
 // ---------------------------------------------------------------------------
-//
-// fn migrate_v2(conn: &Connection) -> Result<()> {
-//     // 1. DDL: add a new column
-//     conn.execute_batch("ALTER TABLE entries ADD COLUMN description TEXT;")?;
-//
-//     // 2. Data backfill: populate from existing content
-//     let mut stmt = conn.prepare(
-//         "SELECT ec.entry_id, ec.readable_html
-//          FROM entry_content ec
-//          WHERE ec.readable_html IS NOT NULL"
-//     )?;
-//     let entries: Vec<(String, Vec<u8>)> = stmt
-//         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.
-//         .collect::<std::result::Result<_, _>>()?;
-//
-//     tracing::info!("backfilling descriptions for {} entries", entries.len());
-//     for (id, html_bytes) in &entries {
-//         let html = String::from_utf8_lossy(html_bytes);
-//         let desc = extract_first_paragraph(&html); // hypothetical helper
-//         conn.execute(
-//             "UPDATE entries SET description = ?1 WHERE id = ?2",
-//             params![desc, id],
-//         )?;
-//     }
-//
-//     // 3. If FTS columns changed, rebuild FTS:
-//     // rebuild_fts(conn)?;
-//
-//     Ok(())
-// }
+
+fn migrate_v2(conn: &Connection) -> Result<()> {
+    // Add columns for tracking extraction/indexing state
+    conn.execute_batch(
+        "ALTER TABLE entries ADD COLUMN index_status TEXT NOT NULL DEFAULT 'ok';
+         ALTER TABLE entries ADD COLUMN index_version INTEGER NOT NULL DEFAULT 0;",
+    )?;
+
+    // Backfill: entries with non-empty extracted text get version 1 (ok).
+    // PDFs with no extracted text get status 'failed', version 0.
+    conn.execute_batch(
+        "UPDATE entries SET index_version = 1
+         WHERE id IN (
+             SELECT e.id FROM entries e
+             JOIN entry_content ec ON ec.entry_id = e.id
+             WHERE ec.extracted_text IS NOT NULL AND ec.extracted_text != ''
+         );
+
+         UPDATE entries SET index_status = 'failed'
+         WHERE content_type = 'pdf'
+           AND id IN (
+               SELECT e.id FROM entries e
+               JOIN entry_content ec ON ec.entry_id = e.id
+               WHERE ec.extracted_text IS NULL OR ec.extracted_text = ''
+           );",
+    )?;
+
+    let backfilled: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM entries WHERE index_version = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let failed: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM entries WHERE index_status = 'failed'",
+        [],
+        |row| row.get(0),
+    )?;
+    tracing::info!(
+        "backfilled index tracking: {backfilled} ok, {failed} failed"
+    );
+
+    Ok(())
+}

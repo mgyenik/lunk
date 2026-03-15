@@ -18,10 +18,15 @@ pub fn create_entry(conn: &Connection, req: CreateEntryRequest) -> Result<Entry>
 
     let word_count = Some(req.extracted_text.split_whitespace().count() as i64);
     let status = req.status.unwrap_or(EntryStatus::Unread);
+    let index_status = if req.extracted_text.is_empty() {
+        IndexStatus::Failed
+    } else {
+        IndexStatus::Ok
+    };
 
     conn.execute(
-        "INSERT INTO entries (id, url, title, content_type, status, domain, word_count, page_count, created_at, updated_at, saved_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO entries (id, url, title, content_type, status, domain, word_count, page_count, index_status, index_version, created_at, updated_at, saved_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             id.to_string(),
             req.url,
@@ -31,6 +36,8 @@ pub fn create_entry(conn: &Connection, req: CreateEntryRequest) -> Result<Entry>
             domain,
             word_count,
             Option::<i64>::None,
+            index_status.as_str(),
+            crate::pdf::INDEX_VERSION,
             now.to_rfc3339(),
             now.to_rfc3339(),
             req.source.as_str(),
@@ -73,6 +80,8 @@ pub fn create_entry(conn: &Connection, req: CreateEntryRequest) -> Result<Entry>
         domain,
         word_count,
         page_count: None,
+        index_status,
+        index_version: crate::pdf::INDEX_VERSION,
         created_at: now,
         updated_at: now,
         saved_by: req.source.as_str().to_string(),
@@ -97,10 +106,15 @@ pub fn create_pdf_entry(
     let word_count = Some(req.extracted_text.split_whitespace().count() as i64);
     let page_count = Some(pages.len() as i64);
     let status = req.status.unwrap_or(EntryStatus::Unread);
+    let index_status = if pages.is_empty() && req.extracted_text.is_empty() {
+        IndexStatus::Failed
+    } else {
+        IndexStatus::Ok
+    };
 
     conn.execute(
-        "INSERT INTO entries (id, url, title, content_type, status, domain, word_count, page_count, created_at, updated_at, saved_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO entries (id, url, title, content_type, status, domain, word_count, page_count, index_status, index_version, created_at, updated_at, saved_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             id.to_string(),
             req.url,
@@ -110,6 +124,8 @@ pub fn create_pdf_entry(
             domain,
             word_count,
             page_count,
+            index_status.as_str(),
+            crate::pdf::INDEX_VERSION,
             now.to_rfc3339(),
             now.to_rfc3339(),
             req.source.as_str(),
@@ -155,6 +171,8 @@ pub fn create_pdf_entry(
         domain,
         word_count,
         page_count,
+        index_status,
+        index_version: crate::pdf::INDEX_VERSION,
         created_at: now,
         updated_at: now,
         saved_by: req.source.as_str().to_string(),
@@ -165,7 +183,8 @@ pub fn create_pdf_entry(
 pub fn get_entry(conn: &Connection, id: &Uuid) -> Result<Entry> {
     let mut stmt = conn.prepare(
         "SELECT e.id, e.url, e.title, e.content_type, e.status, e.domain,
-                e.word_count, e.page_count, e.created_at, e.updated_at, e.saved_by
+                e.word_count, e.page_count, e.index_status, e.index_version,
+                e.created_at, e.updated_at, e.saved_by
          FROM entries e WHERE e.id = ?1",
     )?;
 
@@ -179,9 +198,11 @@ pub fn get_entry(conn: &Connection, id: &Uuid) -> Result<Entry> {
             domain: row.get(5)?,
             word_count: row.get(6)?,
             page_count: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
-            saved_by: row.get(10)?,
+            index_status: row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "ok".to_string()),
+            index_version: row.get::<_, Option<i32>>(9)?.unwrap_or(0),
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+            saved_by: row.get(12)?,
         })
     }).map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => LunkError::NotFound(format!("entry {id}")),
@@ -267,7 +288,8 @@ pub fn list_entries(conn: &Connection, params: &ListParams) -> Result<(Vec<Entry
     // Main query
     let sql = format!(
         "SELECT e.id, e.url, e.title, e.content_type, e.status, e.domain,
-                e.word_count, e.page_count, e.created_at, e.updated_at, e.saved_by
+                e.word_count, e.page_count, e.index_status, e.index_version,
+                e.created_at, e.updated_at, e.saved_by
          FROM entries e {where_clause}
          ORDER BY {sort_col} {sort_dir}
          LIMIT ?{} OFFSET ?{}",
@@ -291,9 +313,11 @@ pub fn list_entries(conn: &Connection, params: &ListParams) -> Result<(Vec<Entry
             domain: row.get(5)?,
             word_count: row.get(6)?,
             page_count: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
-            saved_by: row.get(10)?,
+            index_status: row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "ok".to_string()),
+            index_version: row.get::<_, Option<i32>>(9)?.unwrap_or(0),
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+            saved_by: row.get(12)?,
         })
     })?;
 
@@ -417,22 +441,30 @@ pub fn entry_exists_by_url(conn: &Connection, url: &str) -> Result<Option<Uuid>>
     }
 }
 
-/// Re-extract text from stored PDF blobs for entries that have no extracted text.
-/// Updates extracted_text, word_count, page_count, title (if empty), and pdf_pages.
-/// Returns the number of entries backfilled.
+/// Re-extract text from stored PDF blobs for entries that need reprocessing.
+/// Targets PDFs with no extracted text, failed index status, or old index version.
+/// Updates extracted_text, word_count, page_count, title (if empty), index_status,
+/// index_version, and pdf_pages. Returns the number of entries backfilled.
 pub fn backfill_pdfs(conn: &Connection) -> Result<usize> {
-    // Find PDF entries with empty or missing extracted text
+    let current_version = crate::pdf::INDEX_VERSION;
+
+    // Find PDF entries that need (re)processing
     let mut stmt = conn.prepare(
         "SELECT e.id, e.url, e.title, ec.pdf_data
          FROM entries e
          JOIN entry_content ec ON ec.entry_id = e.id
          WHERE e.content_type = 'pdf'
            AND ec.pdf_data IS NOT NULL
-           AND (ec.extracted_text IS NULL OR ec.extracted_text = '')",
+           AND (
+               ec.extracted_text IS NULL
+               OR ec.extracted_text = ''
+               OR COALESCE(e.index_status, 'ok') IN ('failed', 'pending')
+               OR COALESCE(e.index_version, 0) < ?1
+           )",
     )?;
 
     let candidates: Vec<(String, Option<String>, String, Vec<u8>)> = stmt
-        .query_map([], |row| {
+        .query_map(params![current_version], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -486,11 +518,13 @@ pub fn backfill_pdfs(conn: &Connection) -> Result<usize> {
         // Update entries metadata
         conn.execute(
             "UPDATE entries SET word_count = ?1, page_count = ?2, title = ?3, \
-             updated_at = ?4 WHERE id = ?5",
+             index_status = ?4, index_version = ?5, updated_at = ?6 WHERE id = ?7",
             params![
                 word_count,
                 page_count,
                 new_title,
+                IndexStatus::Ok.as_str(),
+                crate::pdf::INDEX_VERSION,
                 Utc::now().to_rfc3339(),
                 id
             ],
@@ -535,6 +569,8 @@ struct EntryRow {
     domain: Option<String>,
     word_count: Option<i64>,
     page_count: Option<i64>,
+    index_status: String,
+    index_version: i32,
     created_at: String,
     updated_at: String,
     saved_by: String,
@@ -547,6 +583,8 @@ fn row_to_entry(row: EntryRow, tags: Vec<String>) -> Result<Entry> {
         .ok_or_else(|| LunkError::Other(format!("invalid content_type: {}", row.content_type)))?;
     let status = EntryStatus::parse(&row.status)
         .ok_or_else(|| LunkError::Other(format!("invalid status: {}", row.status)))?;
+    let index_status = IndexStatus::parse(&row.index_status)
+        .unwrap_or(IndexStatus::Ok);
     let created_at = chrono::DateTime::parse_from_rfc3339(&row.created_at)
         .map_err(|e| LunkError::Other(format!("invalid created_at: {e}")))?
         .with_timezone(&chrono::Utc);
@@ -563,6 +601,8 @@ fn row_to_entry(row: EntryRow, tags: Vec<String>) -> Result<Entry> {
         domain: row.domain,
         word_count: row.word_count,
         page_count: row.page_count,
+        index_status,
+        index_version: row.index_version,
         created_at,
         updated_at,
         saved_by: row.saved_by,

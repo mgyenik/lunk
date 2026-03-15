@@ -179,6 +179,9 @@ pub async fn search(query: &str, limit: i64, _content_type: Option<&str>, json: 
         if let Some(page) = hit.matched_page {
             println!("    Matched on page {page}");
         }
+        if e.index_status == IndexStatus::Failed {
+            println!("    \x1b[33m⚠ text extraction failed\x1b[0m");
+        }
         println!();
     }
 
@@ -240,6 +243,11 @@ pub async fn list_entries(
             print!(" | tags: {}", e.tags.join(", "));
         }
         println!();
+        if e.index_status == IndexStatus::Failed {
+            println!("    \x1b[33m⚠ text extraction failed — not searchable\x1b[0m");
+        } else if e.index_status == IndexStatus::Pending {
+            println!("    \x1b[33m⚠ pending reindex\x1b[0m");
+        }
         println!();
     }
 

@@ -109,10 +109,17 @@ async function savePage(status) {
       setProgress(100, "Done!");
 
       const entry = response.data;
-      showResult(
-        "success",
-        `Saved: ${entry?.title || "page"}`
-      );
+      if (entry?.index_status === "failed") {
+        showResult(
+          "warning",
+          `Saved "${entry?.title || "page"}" but text extraction failed — this entry won't appear in search results. Try running 'lunk backfill-pdfs' after updating.`
+        );
+      } else {
+        showResult(
+          "success",
+          `Saved: ${entry?.title || "page"}`
+        );
+      }
     } else {
       showResult("error", `Failed: ${response?.error || "Unknown error"}`);
     }
