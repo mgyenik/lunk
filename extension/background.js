@@ -284,6 +284,20 @@ async function savePage(tabId, tags = []) {
     throw new Error(result.error);
   }
 
+  // If content script couldn't fetch the PDF (e.g. file:// URL),
+  // try fetching from the background service worker
+  let pdfBase64 = result.pdf_base64 || null;
+  if (result.content_type === "pdf" && !pdfBase64 && result.needs_background_fetch) {
+    try {
+      const resp = await fetch(result.url);
+      const blob = await resp.blob();
+      const buffer = await blob.arrayBuffer();
+      pdfBase64 = arrayBufferToBase64(buffer);
+    } catch (err) {
+      throw new Error(`PDF capture failed: ${err.message}`);
+    }
+  }
+
   // Send to native host or HTTP API
   const saveData = {
     url: result.url,
@@ -292,7 +306,7 @@ async function savePage(tabId, tags = []) {
     extracted_text: result.extracted_text || "",
     readable_html: result.readable_html || null,
     snapshot_html: result.snapshot_html || null,
-    pdf_base64: result.pdf_base64 || null,
+    pdf_base64: pdfBase64,
     tags: tags,
   };
 
@@ -393,3 +407,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
   }
 });
+
+// --- Utilities ---
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}

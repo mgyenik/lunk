@@ -46,11 +46,12 @@
           // keep whatever title we have
         }
       }
-      try {
-        const pdfData = await fetchPdfData();
+      const pdfData = await fetchPdfData();
+      if (pdfData) {
         result.pdf_base64 = pdfData;
-      } catch (err) {
-        result.error = `PDF capture failed: ${err.message}`;
+      } else {
+        // Signal that background should try fetching the PDF itself
+        result.needs_background_fetch = true;
       }
       return result;
     }
@@ -218,17 +219,23 @@
   }
 
   async function fetchPdfData() {
-    const response = await fetch(window.location.href);
-    const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result.split(",")[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    try {
+      const response = await fetch(window.location.href);
+      const blob = await response.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = reader.result.split(",")[1];
+          resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      // file:// URLs can't be fetched from content scripts —
+      // return null and let the background script handle it
+      return null;
+    }
   }
 
   // --- Utility functions ---

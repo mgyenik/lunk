@@ -12,7 +12,8 @@
   ],
   "host_permissions": [
     "http://127.0.0.1:9723/*",
-    "http://127.0.0.1:9724/*"
+    "http://127.0.0.1:9724/*",
+    "file:///*"
   ],
   "background": {
     "service_worker": "background.js"
