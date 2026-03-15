@@ -11,6 +11,7 @@
     "scripting"
   ],
   "host_permissions": [
+    "<all_urls>",
     "http://127.0.0.1:9723/*",
     "http://127.0.0.1:9724/*",
     "file:///*"
@@ -29,7 +30,28 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["lib/Readability.js", "content.js"],
+      "js": ["lib/single-file-hooks-frames.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["lib/single-file-frames.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["lib/single-file-bootstrap.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["lib/single-file.js", "lib/Readability.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

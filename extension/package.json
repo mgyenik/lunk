@@ -1,0 +1,16 @@
+{
+  "name": "lunk-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.0",
+    "@rollup/plugin-terser": "^0.4.0",
+    "rollup": "^4.0.0"
+  },
+  "dependencies": {
+    "single-file-core": "^1.5.84"
+  }
+}

@@ -263,10 +263,24 @@ async function ensureContentScript(tabId) {
   try {
     await chrome.tabs.sendMessage(tabId, { action: "ping" });
   } catch {
-    // Content script not injected — inject it now
+    // Content script not injected — inject SingleFile + Readability + content.js
+    // Hooks must run in MAIN world first
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ["lib/single-file-hooks-frames.js"],
+      world: "MAIN",
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ["lib/single-file-frames.js"],
+    });
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["lib/Readability.js", "content.js"],
+      files: ["lib/single-file-bootstrap.js"],
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["lib/single-file.js", "lib/Readability.js", "content.js"],
     });
   }
 }
@@ -405,8 +419,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         .catch((err) => sendResponse({ success: false, error: err.message }));
       return true;
     }
+
+    case "fetch_resource": {
+      // Cross-origin fetch fallback for SingleFile: content script can't fetch
+      // some resources due to CORS, so we fetch them here (service worker has
+      // <all_urls> host permission)
+      fetchResource(msg.url)
+        .then((resp) => sendResponse(resp))
+        .catch((err) => sendResponse({ error: err.message }));
+      return true;
+    }
   }
 });
+
+// --- Resource Fetch (for SingleFile cross-origin) ---
+
+async function fetchResource(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const contentType = resp.headers.get("Content-Type") || "application/octet-stream";
+  const buffer = await resp.arrayBuffer();
+  return {
+    data: arrayBufferToBase64(buffer),
+    contentType,
+  };
+}
 
 // --- Utilities ---
 

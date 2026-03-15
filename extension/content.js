@@ -1,7 +1,8 @@
 // Content script: runs in page context.
-// Handles two extraction modes:
+// Handles three extraction modes:
 // 1. Readability extraction (clean text + readable HTML)
-// 2. Full page snapshot (self-contained HTML with inlined assets)
+// 2. Full page snapshot via SingleFile (self-contained HTML archive)
+// 3. PDF capture (fetch raw PDF bytes)
 
 (function () {
   "use strict";
@@ -16,6 +17,11 @@
     }
     if (msg.action === "ping") {
       sendResponse({ ok: true });
+      return false;
+    }
+    // SingleFile cross-origin fetch fallback: background asks us to fetch
+    if (msg.action === "singlefile.fetchResponse") {
+      // Response from background for a cross-origin fetch we requested
       return false;
     }
   });
@@ -68,7 +74,7 @@
       result.readable_html = null;
     }
 
-    // Step 2: Full page snapshot (slower, 1-5s)
+    // Step 2: Full page snapshot via SingleFile
     if (options.skipSnapshot !== true) {
       try {
         const snapshot = await captureSnapshot();
@@ -104,106 +110,86 @@
     };
   }
 
-  // --- Full page snapshot ---
+  // --- Full page snapshot via SingleFile ---
 
   async function captureSnapshot() {
-    const clone = document.documentElement.cloneNode(true);
-
-    // Remove scripts
-    clone.querySelectorAll("script, noscript").forEach((el) => el.remove());
-
-    // Remove event handler attributes
-    const allElements = clone.querySelectorAll("*");
-    for (const el of allElements) {
-      const attrs = Array.from(el.attributes);
-      for (const attr of attrs) {
-        if (attr.name.startsWith("on")) {
-          el.removeAttribute(attr.name);
-        }
-      }
+    // SingleFile is loaded as a UMD global via manifest content_scripts
+    if (typeof globalThis.singlefile === "undefined" || !globalThis.singlefile.getPageData) {
+      throw new Error("SingleFile not loaded");
     }
 
-    // Inline images as data URIs
-    const images = clone.querySelectorAll("img[src]");
-    const imagePromises = Array.from(images).map(async (img) => {
+    // Custom fetch that falls back to background service worker for cross-origin
+    async function bgFetch(url, options) {
       try {
-        const src = img.getAttribute("src");
-        if (!src || src.startsWith("data:")) return;
-
-        const absoluteUrl = new URL(src, window.location.href).href;
-        const dataUri = await fetchAsDataUri(absoluteUrl);
-        if (dataUri) {
-          img.setAttribute("src", dataUri);
-        }
+        const resp = await fetch(url, options);
+        if (resp.ok) return resp;
+        throw new Error(`HTTP ${resp.status}`);
       } catch {
-        // Keep original src on failure
-      }
-    });
-
-    // Also handle srcset
-    const srcsetImages = clone.querySelectorAll("img[srcset], source[srcset]");
-    for (const el of srcsetImages) {
-      el.removeAttribute("srcset");
-    }
-
-    // Inline CSS from stylesheets
-    let inlinedStyles = "";
-    for (const sheet of document.styleSheets) {
-      try {
-        const rules = Array.from(sheet.cssRules || []);
-        for (const rule of rules) {
-          inlinedStyles += rule.cssText + "\n";
-        }
-      } catch {
-        // Cross-origin stylesheet - try to fetch it
-        if (sheet.href) {
-          try {
-            const cssText = await fetchText(sheet.href);
-            if (cssText) {
-              inlinedStyles += cssText + "\n";
+        // Ask background to fetch cross-origin resource
+        return new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage(
+            { target: "background", action: "fetch_resource", url },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+              }
+              if (!response || response.error) {
+                reject(new Error(response?.error || "fetch failed"));
+                return;
+              }
+              // Reconstruct a Response-like object from the base64 data
+              const bytes = Uint8Array.from(atob(response.data), c => c.charCodeAt(0));
+              const blob = new Blob([bytes], { type: response.contentType || "application/octet-stream" });
+              resolve(new Response(blob, {
+                status: 200,
+                headers: { "Content-Type": response.contentType || "application/octet-stream" },
+              }));
             }
-          } catch {
-            // Skip inaccessible stylesheets
-          }
-        }
+          );
+        });
       }
     }
 
-    // Remove existing link[rel=stylesheet] and add our inlined styles
-    clone.querySelectorAll('link[rel="stylesheet"], link[rel="preload"]').forEach((el) => el.remove());
+    const pageData = await globalThis.singlefile.getPageData(
+      {
+        // Content cleanup
+        removeHiddenElements: true,
+        removeUnusedStyles: true,
+        removeUnusedFonts: true,
+        removeAlternativeFonts: true,
+        removeAlternativeMedias: true,
+        removeAlternativeImages: true,
+        compressHTML: true,
 
-    // Inline background images in CSS
-    inlinedStyles = await inlineCssUrls(inlinedStyles);
+        // Block active content
+        blockScripts: true,
+        blockVideos: false,
+        blockAudios: true,
 
-    const styleEl = clone.ownerDocument.createElement("style");
-    styleEl.textContent = inlinedStyles;
-    const head = clone.querySelector("head");
-    if (head) {
-      head.appendChild(styleEl);
-    }
+        // Lazy-loaded images
+        loadDeferredImages: true,
+        loadDeferredImagesMaxIdleTime: 1500,
 
-    // Add base tag to resolve any remaining relative URLs
-    const existingBase = clone.querySelector("base");
-    if (!existingBase) {
-      const base = clone.ownerDocument.createElement("base");
-      base.href = window.location.href;
-      if (head) {
-        head.prepend(base);
-      }
-    }
+        // Frames
+        removeFrames: false,
 
-    // Wait for image conversions (with timeout)
-    await Promise.race([
-      Promise.allSettled(imagePromises),
-      new Promise((resolve) => setTimeout(resolve, 8000)),
-    ]);
+        // Metadata
+        insertCanonicalLink: true,
+        insertMetaCSP: true,
+        insertMetaNoIndex: false,
+        insertSingleFileComment: true,
 
-    // Build final HTML
-    const doctype = document.doctype
-      ? `<!DOCTYPE ${document.doctype.name}>`
-      : "<!DOCTYPE html>";
+        // Deduplication
+        groupDuplicateImages: true,
 
-    return doctype + "\n" + clone.outerHTML;
+        // Resource limits
+        maxResourceSizeEnabled: false,
+      },
+      { fetch: bgFetch, frameFetch: bgFetch }
+    );
+
+    return pageData.content;
   }
 
   // --- PDF handling ---
@@ -236,54 +222,5 @@
       // return null and let the background script handle it
       return null;
     }
-  }
-
-  // --- Utility functions ---
-
-  async function fetchAsDataUri(url) {
-    try {
-      const response = await fetch(url, { mode: "cors" });
-      if (!response.ok) return null;
-      const blob = await response.blob();
-      if (blob.size > 10 * 1024 * 1024) return null; // Skip >10MB
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(blob);
-      });
-    } catch {
-      return null;
-    }
-  }
-
-  async function fetchText(url) {
-    try {
-      const response = await fetch(url, { mode: "cors" });
-      if (!response.ok) return null;
-      return await response.text();
-    } catch {
-      return null;
-    }
-  }
-
-  async function inlineCssUrls(css) {
-    // Find url() references in CSS and inline small ones
-    const urlRegex = /url\(["']?((?!data:)[^"')]+)["']?\)/g;
-    const matches = [...css.matchAll(urlRegex)];
-
-    for (const match of matches) {
-      try {
-        const url = new URL(match[1], window.location.href).href;
-        const dataUri = await fetchAsDataUri(url);
-        if (dataUri) {
-          css = css.replace(match[0], `url("${dataUri}")`);
-        }
-      } catch {
-        // Keep original URL
-      }
-    }
-
-    return css;
   }
 })();
