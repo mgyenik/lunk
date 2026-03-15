@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::errors::{LunkError, Result};
 use crate::models::*;
+use crate::search::sanitize_fts_query;
 
 pub fn create_entry(conn: &Connection, req: CreateEntryRequest) -> Result<Entry> {
     let id = Uuid::now_v7();
@@ -17,7 +18,6 @@ pub fn create_entry(conn: &Connection, req: CreateEntryRequest) -> Result<Entry>
     });
 
     let word_count = Some(req.extracted_text.split_whitespace().count() as i64);
-    let status = req.status.unwrap_or(EntryStatus::Unread);
     let index_status = if req.extracted_text.is_empty() {
         IndexStatus::Failed
     } else {
@@ -32,7 +32,7 @@ pub fn create_entry(conn: &Connection, req: CreateEntryRequest) -> Result<Entry>
             req.url,
             req.title,
             req.content_type.as_str(),
-            status.as_str(),
+            "read",
             domain,
             word_count,
             Option::<i64>::None,
@@ -76,7 +76,6 @@ pub fn create_entry(conn: &Connection, req: CreateEntryRequest) -> Result<Entry>
         url: req.url,
         title: req.title,
         content_type: req.content_type,
-        status,
         domain,
         word_count,
         page_count: None,
@@ -105,7 +104,6 @@ pub fn create_pdf_entry(
 
     let word_count = Some(req.extracted_text.split_whitespace().count() as i64);
     let page_count = Some(pages.len() as i64);
-    let status = req.status.unwrap_or(EntryStatus::Unread);
     let index_status = if pages.is_empty() && req.extracted_text.is_empty() {
         IndexStatus::Failed
     } else {
@@ -120,7 +118,7 @@ pub fn create_pdf_entry(
             req.url,
             req.title,
             ContentType::Pdf.as_str(),
-            status.as_str(),
+            "read",
             domain,
             word_count,
             page_count,
@@ -167,7 +165,6 @@ pub fn create_pdf_entry(
         url: req.url,
         title: req.title,
         content_type: ContentType::Pdf,
-        status,
         domain,
         word_count,
         page_count,
@@ -182,7 +179,7 @@ pub fn create_pdf_entry(
 
 pub fn get_entry(conn: &Connection, id: &Uuid) -> Result<Entry> {
     let mut stmt = conn.prepare(
-        "SELECT e.id, e.url, e.title, e.content_type, e.status, e.domain,
+        "SELECT e.id, e.url, e.title, e.content_type, e.domain,
                 e.word_count, e.page_count, e.index_status, e.index_version,
                 e.created_at, e.updated_at, e.saved_by
          FROM entries e WHERE e.id = ?1",
@@ -194,15 +191,14 @@ pub fn get_entry(conn: &Connection, id: &Uuid) -> Result<Entry> {
             url: row.get(1)?,
             title: row.get(2)?,
             content_type: row.get(3)?,
-            status: row.get(4)?,
-            domain: row.get(5)?,
-            word_count: row.get(6)?,
-            page_count: row.get(7)?,
-            index_status: row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "ok".to_string()),
-            index_version: row.get::<_, Option<i32>>(9)?.unwrap_or(0),
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
-            saved_by: row.get(12)?,
+            domain: row.get(4)?,
+            word_count: row.get(5)?,
+            page_count: row.get(6)?,
+            index_status: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "ok".to_string()),
+            index_version: row.get::<_, Option<i32>>(8)?.unwrap_or(0),
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+            saved_by: row.get(11)?,
         })
     }).map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => LunkError::NotFound(format!("entry {id}")),
@@ -238,10 +234,6 @@ pub fn list_entries(conn: &Connection, params: &ListParams) -> Result<(Vec<Entry
     let mut conditions = Vec::new();
     let mut bind_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
-    if let Some(status) = &params.status {
-        bind_values.push(Box::new(status.as_str().to_string()));
-        conditions.push(format!("e.status = ?{}", bind_values.len()));
-    }
     if let Some(ct) = &params.content_type {
         bind_values.push(Box::new(ct.as_str().to_string()));
         conditions.push(format!("e.content_type = ?{}", bind_values.len()));
@@ -287,7 +279,7 @@ pub fn list_entries(conn: &Connection, params: &ListParams) -> Result<(Vec<Entry
 
     // Main query
     let sql = format!(
-        "SELECT e.id, e.url, e.title, e.content_type, e.status, e.domain,
+        "SELECT e.id, e.url, e.title, e.content_type, e.domain,
                 e.word_count, e.page_count, e.index_status, e.index_version,
                 e.created_at, e.updated_at, e.saved_by
          FROM entries e {where_clause}
@@ -309,15 +301,14 @@ pub fn list_entries(conn: &Connection, params: &ListParams) -> Result<(Vec<Entry
             url: row.get(1)?,
             title: row.get(2)?,
             content_type: row.get(3)?,
-            status: row.get(4)?,
-            domain: row.get(5)?,
-            word_count: row.get(6)?,
-            page_count: row.get(7)?,
-            index_status: row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "ok".to_string()),
-            index_version: row.get::<_, Option<i32>>(9)?.unwrap_or(0),
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
-            saved_by: row.get(12)?,
+            domain: row.get(4)?,
+            word_count: row.get(5)?,
+            page_count: row.get(6)?,
+            index_status: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "ok".to_string()),
+            index_version: row.get::<_, Option<i32>>(8)?.unwrap_or(0),
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+            saved_by: row.get(11)?,
         })
     })?;
 
@@ -331,24 +322,10 @@ pub fn list_entries(conn: &Connection, params: &ListParams) -> Result<(Vec<Entry
     Ok((entries, total))
 }
 
-pub fn update_entry_status(conn: &Connection, id: &Uuid, status: EntryStatus) -> Result<()> {
-    let now = Utc::now();
-    let changed = conn.execute(
-        "UPDATE entries SET status = ?1, updated_at = ?2 WHERE id = ?3",
-        params![status.as_str(), now.to_rfc3339(), id.to_string()],
-    )?;
-
-    if changed == 0 {
-        return Err(LunkError::NotFound(format!("entry {id}")));
-    }
-    Ok(())
-}
-
 pub fn update_entry(
     conn: &Connection,
     id: &Uuid,
     title: Option<&str>,
-    status: Option<EntryStatus>,
     tags: Option<&[String]>,
 ) -> Result<Entry> {
     let now = Utc::now();
@@ -360,32 +337,8 @@ pub fn update_entry(
         )?;
     }
 
-    if let Some(status) = status {
-        conn.execute(
-            "UPDATE entries SET status = ?1, updated_at = ?2 WHERE id = ?3",
-            params![status.as_str(), now.to_rfc3339(), id.to_string()],
-        )?;
-    }
-
     if let Some(tags) = tags {
-        // Remove existing tags
-        conn.execute(
-            "DELETE FROM entry_tags WHERE entry_id = ?1",
-            params![id.to_string()],
-        )?;
-        // Add new tags
-        for tag_name in tags {
-            ensure_tag(conn, tag_name)?;
-            let tag_id: String = conn.query_row(
-                "SELECT id FROM tags WHERE name = ?1",
-                params![tag_name],
-                |row| row.get(0),
-            )?;
-            conn.execute(
-                "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
-                params![id.to_string(), tag_id],
-            )?;
-        }
+        set_entry_tags(conn, id, tags)?;
     }
 
     // Always bump updated_at
@@ -394,6 +347,17 @@ pub fn update_entry(
         params![now.to_rfc3339(), id.to_string()],
     )?;
 
+    get_entry(conn, id)
+}
+
+/// Replace all tags on an entry.
+pub fn update_entry_tags(conn: &Connection, id: &Uuid, tags: &[String]) -> Result<Entry> {
+    let now = Utc::now();
+    set_entry_tags(conn, id, tags)?;
+    conn.execute(
+        "UPDATE entries SET updated_at = ?1 WHERE id = ?2",
+        params![now.to_rfc3339(), id.to_string()],
+    )?;
     get_entry(conn, id)
 }
 
@@ -565,7 +529,6 @@ struct EntryRow {
     url: Option<String>,
     title: String,
     content_type: String,
-    status: String,
     domain: Option<String>,
     word_count: Option<i64>,
     page_count: Option<i64>,
@@ -581,8 +544,6 @@ fn row_to_entry(row: EntryRow, tags: Vec<String>) -> Result<Entry> {
         .map_err(|e| LunkError::Other(format!("invalid uuid: {e}")))?;
     let content_type = ContentType::parse(&row.content_type)
         .ok_or_else(|| LunkError::Other(format!("invalid content_type: {}", row.content_type)))?;
-    let status = EntryStatus::parse(&row.status)
-        .ok_or_else(|| LunkError::Other(format!("invalid status: {}", row.status)))?;
     let index_status = IndexStatus::parse(&row.index_status)
         .unwrap_or(IndexStatus::Ok);
     let created_at = chrono::DateTime::parse_from_rfc3339(&row.created_at)
@@ -597,7 +558,6 @@ fn row_to_entry(row: EntryRow, tags: Vec<String>) -> Result<Entry> {
         url: row.url,
         title: row.title,
         content_type,
-        status,
         domain: row.domain,
         word_count: row.word_count,
         page_count: row.page_count,
@@ -632,6 +592,110 @@ fn ensure_tag(conn: &Connection, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn set_entry_tags(conn: &Connection, id: &Uuid, tags: &[String]) -> Result<()> {
+    conn.execute(
+        "DELETE FROM entry_tags WHERE entry_id = ?1",
+        params![id.to_string()],
+    )?;
+    for tag_name in tags {
+        ensure_tag(conn, tag_name)?;
+        let tag_id: String = conn.query_row(
+            "SELECT id FROM tags WHERE name = ?1",
+            params![tag_name],
+            |row| row.get(0),
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
+            params![id.to_string(), tag_id],
+        )?;
+    }
+    Ok(())
+}
+
+// --- Tag suggestion queries ---
+
+/// Suggest tags commonly used with entries from the same domain.
+pub fn suggest_tags_by_domain(conn: &Connection, domain: &str, limit: usize) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.name, COUNT(*) as cnt
+         FROM tags t
+         JOIN entry_tags et ON t.id = et.tag_id
+         JOIN entries e ON et.entry_id = e.id
+         WHERE e.domain = ?1
+         GROUP BY t.name
+         ORDER BY cnt DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![domain, limit as i64], |row| row.get::<_, String>(0))?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+}
+
+/// Suggest tags from entries with similar titles (via FTS5).
+pub fn suggest_tags_by_similarity(conn: &Connection, title: &str, limit: usize) -> Result<Vec<String>> {
+    let fts_query = sanitize_fts_query(title);
+    if fts_query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT t.name, COUNT(*) as cnt
+         FROM entries_fts
+         JOIN entries e ON e.rowid = entries_fts.rowid
+         JOIN entry_tags et ON et.entry_id = e.id
+         JOIN tags t ON t.id = et.tag_id
+         WHERE entries_fts MATCH ?1
+         GROUP BY t.name
+         ORDER BY cnt DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![fts_query, limit as i64], |row| row.get::<_, String>(0))?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+}
+
+/// Return the most frequently used tags.
+pub fn suggest_tags_popular(conn: &Connection, limit: usize) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.name
+         FROM tags t
+         JOIN entry_tags et ON t.id = et.tag_id
+         GROUP BY t.id
+         ORDER BY COUNT(et.entry_id) DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit as i64], |row| row.get::<_, String>(0))?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.into())
+}
+
+/// Combined tag suggestions from domain, content similarity, and popularity.
+/// Results are deduplicated: domain > similar > popular priority.
+pub fn get_tag_suggestions(conn: &Connection, domain: Option<&str>, title: &str) -> Result<TagSuggestions> {
+    let domain_tags = if let Some(d) = domain {
+        suggest_tags_by_domain(conn, d, 5)?
+    } else {
+        Vec::new()
+    };
+
+    let all_similar = suggest_tags_by_similarity(conn, title, 10)?;
+    let similar_tags: Vec<String> = all_similar
+        .into_iter()
+        .filter(|t| !domain_tags.contains(t))
+        .take(5)
+        .collect();
+
+    let all_popular = suggest_tags_popular(conn, 15)?;
+    let popular_tags: Vec<String> = all_popular
+        .into_iter()
+        .filter(|t| !domain_tags.contains(t) && !similar_tags.contains(t))
+        .take(5)
+        .collect();
+
+    Ok(TagSuggestions {
+        domain_tags,
+        similar_tags,
+        popular_tags,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,26 +705,35 @@ mod tests {
         db::open_in_memory().unwrap()
     }
 
+    fn test_req(url: &str, title: &str, text: &str) -> CreateEntryRequest {
+        CreateEntryRequest {
+            url: Some(url.to_string()),
+            title: title.to_string(),
+            content_type: ContentType::Article,
+            extracted_text: text.to_string(),
+            snapshot_html: None,
+            readable_html: None,
+            pdf_data: None,
+            tags: None,
+            source: SaveSource::Cli,
+        }
+    }
+
     #[test]
     fn test_create_and_get_entry() {
         let conn = test_conn();
-        let req = CreateEntryRequest {
-            url: Some("https://example.com/article".to_string()),
-            title: "Test Article".to_string(),
-            content_type: ContentType::Article,
-            extracted_text: "This is the full text of the article about Rust programming.".to_string(),
-            snapshot_html: Some(b"<html>full snapshot</html>".to_vec()),
-            readable_html: Some(b"<article>clean text</article>".to_vec()),
-            pdf_data: None,
-            status: Some(EntryStatus::Unread),
-            tags: Some(vec!["rust".to_string(), "programming".to_string()]),
-            source: SaveSource::Cli,
-        };
+        let mut req = test_req(
+            "https://example.com/article",
+            "Test Article",
+            "This is the full text of the article about Rust programming.",
+        );
+        req.snapshot_html = Some(b"<html>full snapshot</html>".to_vec());
+        req.readable_html = Some(b"<article>clean text</article>".to_vec());
+        req.tags = Some(vec!["rust".to_string(), "programming".to_string()]);
 
         let entry = create_entry(&conn, req).unwrap();
         assert_eq!(entry.title, "Test Article");
         assert_eq!(entry.domain, Some("example.com".to_string()));
-        assert_eq!(entry.status, EntryStatus::Unread);
         assert_eq!(entry.tags.len(), 2);
 
         let fetched = get_entry(&conn, &entry.id).unwrap();
@@ -669,27 +742,16 @@ mod tests {
     }
 
     #[test]
-    fn test_update_status() {
+    fn test_update_tags() {
         let conn = test_conn();
-        let req = CreateEntryRequest {
-            url: Some("https://example.com".to_string()),
-            title: "Test".to_string(),
-            content_type: ContentType::Article,
-            extracted_text: "text".to_string(),
-            snapshot_html: None,
-            readable_html: None,
-            pdf_data: None,
-            status: None,
-            tags: None,
-            source: SaveSource::Cli,
-        };
+        let entry = create_entry(&conn, test_req("https://example.com", "Test", "text")).unwrap();
+        assert!(entry.tags.is_empty());
 
-        let entry = create_entry(&conn, req).unwrap();
-        assert_eq!(entry.status, EntryStatus::Unread);
+        let updated = update_entry_tags(&conn, &entry.id, &["rust".to_string(), "web".to_string()]).unwrap();
+        assert_eq!(updated.tags.len(), 2);
 
-        update_entry_status(&conn, &entry.id, EntryStatus::Read).unwrap();
-        let updated = get_entry(&conn, &entry.id).unwrap();
-        assert_eq!(updated.status, EntryStatus::Read);
+        let updated = update_entry_tags(&conn, &entry.id, &["rust".to_string()]).unwrap();
+        assert_eq!(updated.tags, vec!["rust"]);
     }
 
     #[test]
@@ -697,18 +759,14 @@ mod tests {
         let conn = test_conn();
 
         for i in 0..5 {
-            let req = CreateEntryRequest {
-                url: Some(format!("https://example.com/{i}")),
-                title: format!("Article {i}"),
-                content_type: ContentType::Article,
-                extracted_text: format!("content {i}"),
-                snapshot_html: None,
-                readable_html: None,
-                pdf_data: None,
-                status: if i < 3 { Some(EntryStatus::Unread) } else { Some(EntryStatus::Read) },
-                tags: None,
-                source: SaveSource::Cli,
-            };
+            let mut req = test_req(
+                &format!("https://example.com/{i}"),
+                &format!("Article {i}"),
+                &format!("content {i}"),
+            );
+            if i < 3 {
+                req.tags = Some(vec!["batch-a".to_string()]);
+            }
             create_entry(&conn, req).unwrap();
         }
 
@@ -716,33 +774,19 @@ mod tests {
         assert_eq!(total, 5);
         assert_eq!(all.len(), 5);
 
-        let (unread, total) = list_entries(&conn, &ListParams {
-            status: Some(EntryStatus::Unread),
+        let (tagged, total) = list_entries(&conn, &ListParams {
+            tag: Some("batch-a".to_string()),
             ..Default::default()
         }).unwrap();
         assert_eq!(total, 3);
-        assert_eq!(unread.len(), 3);
+        assert_eq!(tagged.len(), 3);
     }
 
     #[test]
     fn test_delete_entry() {
         let conn = test_conn();
-        let req = CreateEntryRequest {
-            url: Some("https://example.com".to_string()),
-            title: "To Delete".to_string(),
-            content_type: ContentType::Article,
-            extracted_text: "text".to_string(),
-            snapshot_html: None,
-            readable_html: None,
-            pdf_data: None,
-            status: None,
-            tags: None,
-            source: SaveSource::Cli,
-        };
-
-        let entry = create_entry(&conn, req).unwrap();
+        let entry = create_entry(&conn, test_req("https://example.com", "To Delete", "text")).unwrap();
         delete_entry(&conn, &entry.id).unwrap();
-
         assert!(get_entry(&conn, &entry.id).is_err());
     }
 
@@ -751,21 +795,53 @@ mod tests {
         let conn = test_conn();
         assert!(entry_exists_by_url(&conn, "https://example.com").unwrap().is_none());
 
-        let req = CreateEntryRequest {
-            url: Some("https://example.com".to_string()),
-            title: "Test".to_string(),
-            content_type: ContentType::Article,
-            extracted_text: "text".to_string(),
-            snapshot_html: None,
-            readable_html: None,
-            pdf_data: None,
-            status: None,
-            tags: None,
-            source: SaveSource::Cli,
-        };
-        let entry = create_entry(&conn, req).unwrap();
-
+        let entry = create_entry(&conn, test_req("https://example.com", "Test", "text")).unwrap();
         let found = entry_exists_by_url(&conn, "https://example.com").unwrap();
         assert_eq!(found, Some(entry.id));
+    }
+
+    #[test]
+    fn test_tag_suggestions_by_domain() {
+        let conn = test_conn();
+
+        // Create entries on arxiv.org with "research" tag
+        for i in 0..3 {
+            let mut req = test_req(
+                &format!("https://arxiv.org/paper/{i}"),
+                &format!("Paper {i}"),
+                &format!("research content {i}"),
+            );
+            req.tags = Some(vec!["research".to_string()]);
+            create_entry(&conn, req).unwrap();
+        }
+
+        let suggestions = suggest_tags_by_domain(&conn, "arxiv.org", 5).unwrap();
+        assert_eq!(suggestions, vec!["research"]);
+
+        // Different domain should yield nothing
+        let suggestions = suggest_tags_by_domain(&conn, "example.com", 5).unwrap();
+        assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_tag_suggestions_popular() {
+        let conn = test_conn();
+
+        // Create entries with varying tag usage
+        for i in 0..5 {
+            let mut req = test_req(
+                &format!("https://example.com/{i}"),
+                &format!("Article {i}"),
+                &format!("content {i}"),
+            );
+            req.tags = Some(vec!["common".to_string()]);
+            create_entry(&conn, req).unwrap();
+        }
+        let mut req = test_req("https://example.com/rare", "Rare", "rare content");
+        req.tags = Some(vec!["rare".to_string()]);
+        create_entry(&conn, req).unwrap();
+
+        let popular = suggest_tags_popular(&conn, 5).unwrap();
+        assert_eq!(popular[0], "common");
     }
 }

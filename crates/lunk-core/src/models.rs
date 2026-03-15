@@ -26,32 +26,6 @@ impl ContentType {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum EntryStatus {
-    Unread,
-    Read,
-    Archived,
-}
-
-impl EntryStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            EntryStatus::Unread => "unread",
-            EntryStatus::Read => "read",
-            EntryStatus::Archived => "archived",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "unread" => Some(EntryStatus::Unread),
-            "read" => Some(EntryStatus::Read),
-            "archived" => Some(EntryStatus::Archived),
-            _ => None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -111,7 +85,6 @@ pub struct Entry {
     pub url: Option<String>,
     pub title: String,
     pub content_type: ContentType,
-    pub status: EntryStatus,
     pub domain: Option<String>,
     pub word_count: Option<i64>,
     pub page_count: Option<i64>,
@@ -163,14 +136,12 @@ pub struct CreateEntryRequest {
     pub snapshot_html: Option<Vec<u8>>,
     pub readable_html: Option<Vec<u8>>,
     pub pdf_data: Option<Vec<u8>>,
-    pub status: Option<EntryStatus>,
     pub tags: Option<Vec<String>>,
     pub source: SaveSource,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListParams {
-    pub status: Option<EntryStatus>,
     pub content_type: Option<ContentType>,
     pub tag: Option<String>,
     pub domain: Option<String>,
@@ -183,7 +154,6 @@ pub struct ListParams {
 impl Default for ListParams {
     fn default() -> Self {
         Self {
-            status: None,
             content_type: None,
             tag: None,
             domain: None,
@@ -199,6 +169,13 @@ impl Default for ListParams {
 pub struct TagWithCount {
     pub name: String,
     pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagSuggestions {
+    pub domain_tags: Vec<String>,
+    pub similar_tags: Vec<String>,
+    pub popular_tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

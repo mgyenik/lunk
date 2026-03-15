@@ -33,7 +33,7 @@ pub fn search(
 
     // Main search query with snippets
     let mut stmt = conn.prepare(
-        "SELECT e.id, e.url, e.title, e.content_type, e.status, e.domain,
+        "SELECT e.id, e.url, e.title, e.content_type, e.domain,
                 e.word_count, e.page_count, e.index_status, e.index_version,
                 e.created_at, e.updated_at, e.saved_by,
                 snippet(entries_fts, 1, '<mark>', '</mark>', '...', 40) as snippet
@@ -51,16 +51,15 @@ pub fn search(
                 url: row.get(1)?,
                 title: row.get(2)?,
                 content_type: row.get(3)?,
-                status: row.get(4)?,
-                domain: row.get(5)?,
-                word_count: row.get(6)?,
-                page_count: row.get(7)?,
-                index_status: row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "ok".to_string()),
-                index_version: row.get::<_, Option<i32>>(9)?.unwrap_or(0),
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
-                saved_by: row.get(12)?,
-                snippet: row.get(13)?,
+                domain: row.get(4)?,
+                word_count: row.get(5)?,
+                page_count: row.get(6)?,
+                index_status: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "ok".to_string()),
+                index_version: row.get::<_, Option<i32>>(8)?.unwrap_or(0),
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+                saved_by: row.get(11)?,
+                snippet: row.get(12)?,
             },
         ))
     })?;
@@ -74,8 +73,6 @@ pub fn search(
             .map_err(|e| LunkError::Other(format!("invalid uuid: {e}")))?;
         let content_type = ContentType::parse(&row.content_type)
             .ok_or_else(|| LunkError::Other(format!("invalid content_type: {}", row.content_type)))?;
-        let status = EntryStatus::parse(&row.status)
-            .ok_or_else(|| LunkError::Other(format!("invalid status: {}", row.status)))?;
         let index_status = IndexStatus::parse(&row.index_status)
             .unwrap_or(IndexStatus::Ok);
         let created_at = chrono::DateTime::parse_from_rfc3339(&row.created_at)
@@ -98,7 +95,6 @@ pub fn search(
                 url: row.url,
                 title: row.title,
                 content_type,
-                status,
                 domain: row.domain,
                 word_count: row.word_count,
                 page_count: row.page_count,
@@ -176,7 +172,7 @@ fn find_matching_pdf_page(conn: &Connection, entry_id: &str, query: &str) -> Res
     }
 }
 
-fn sanitize_fts_query(query: &str) -> String {
+pub fn sanitize_fts_query(query: &str) -> String {
     // Wrap each word in quotes and join with spaces (implicit AND in FTS5).
     // Quoting prevents FTS5 operator injection (AND, OR, NOT, NEAR, etc.)
     // and ensures special characters like parentheses and colons are treated as literals.
@@ -222,7 +218,6 @@ struct EntryRowWithSnippet {
     url: Option<String>,
     title: String,
     content_type: String,
-    status: String,
     domain: Option<String>,
     word_count: Option<i64>,
     page_count: Option<i64>,
@@ -256,7 +251,6 @@ mod tests {
             snapshot_html: None,
             readable_html: None,
             pdf_data: None,
-            status: Some(EntryStatus::Read),
             tags: None,
             source: SaveSource::Cli,
         }).unwrap();
@@ -269,7 +263,6 @@ mod tests {
             snapshot_html: None,
             readable_html: None,
             pdf_data: None,
-            status: Some(EntryStatus::Unread),
             tags: None,
             source: SaveSource::Cli,
         }).unwrap();
