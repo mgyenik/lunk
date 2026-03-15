@@ -131,7 +131,7 @@ async function sendHttpMessage(action, data) {
           title: data.title,
           content_type: data.content_type || "article",
           extracted_text: data.extracted_text || "",
-          status: data.status || "unread",
+          tags: data.tags || [],
           source: "extension",
         };
 
@@ -182,6 +182,27 @@ async function sendHttpMessage(action, data) {
         };
       }
 
+      case "get_tag_suggestions": {
+        const params = new URLSearchParams();
+        if (data.domain) params.set("domain", data.domain);
+        if (data.title) params.set("title", data.title);
+        const resp = await fetch(`${API_BASE}/tags/suggestions?${params}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const suggestions = await resp.json();
+        return { success: true, data: suggestions };
+      }
+
+      case "update_tags": {
+        const resp = await fetch(`${API_BASE}/entries/${data.id}/tags`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags: data.tags }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const entry = await resp.json();
+        return { success: true, data: entry };
+      }
+
       case "ping": {
         const resp = await fetch(`${API_BASE}/health`);
         return { success: resp.ok, data: { pong: true } };
@@ -205,8 +226,8 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 
   chrome.contextMenus.create({
-    id: "lunk-queue",
-    title: "Queue in Lunk (read later)",
+    id: "lunk-read-later",
+    title: "Save to Lunk (read later)",
     contexts: ["page", "link"],
   });
 });
@@ -214,10 +235,10 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab?.id) return;
 
-  const status = info.menuItemId === "lunk-queue" ? "unread" : "read";
+  const tags = info.menuItemId === "lunk-read-later" ? ["read-later"] : [];
 
   try {
-    await savePage(tab.id, status);
+    await savePage(tab.id, tags);
   } catch (err) {
     console.error("Lunk: context menu save failed:", err);
   }
@@ -230,9 +251,9 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (!tab?.id) return;
 
   if (command === "save-page") {
-    await savePage(tab.id, "read");
-  } else if (command === "queue-page") {
-    await savePage(tab.id, "unread");
+    await savePage(tab.id, []);
+  } else if (command === "read-later-page") {
+    await savePage(tab.id, ["read-later"]);
   }
 });
 
@@ -250,7 +271,7 @@ async function ensureContentScript(tabId) {
   }
 }
 
-async function savePage(tabId, status) {
+async function savePage(tabId, tags = []) {
   await ensureContentScript(tabId);
 
   // Send extraction request to content script
@@ -272,7 +293,7 @@ async function savePage(tabId, status) {
     readable_html: result.readable_html || null,
     snapshot_html: result.snapshot_html || null,
     pdf_base64: result.pdf_base64 || null,
-    status: status,
+    tags: tags,
   };
 
   const response = await sendNativeMessage("save_entry", saveData);
@@ -334,9 +355,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg.action) {
     case "save": {
       const tabId = msg.tabId;
-      const status = msg.status || "unread";
+      const tags = msg.tags || [];
 
-      savePage(tabId, status)
+      savePage(tabId, tags)
         .then((data) => sendResponse({ success: true, data }))
         .catch((err) => sendResponse({ success: false, error: err.message }));
       return true; // async
@@ -345,6 +366,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case "check_status": {
       const url = msg.url;
       sendNativeMessage("get_status", { url })
+        .then((resp) => sendResponse(resp))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+
+    case "get_tag_suggestions": {
+      sendNativeMessage("get_tag_suggestions", msg.data || {})
+        .then((resp) => sendResponse(resp))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+
+    case "update_tags": {
+      sendNativeMessage("update_tags", msg.data || {})
         .then((resp) => sendResponse(resp))
         .catch((err) => sendResponse({ success: false, error: err.message }));
       return true;

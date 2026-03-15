@@ -42,9 +42,9 @@
       "suggested_key": { "default": "Alt+S" },
       "description": "Save current page"
     },
-    "queue-page": {
+    "read-later-page": {
       "suggested_key": { "default": "Alt+Q" },
-      "description": "Add current page to read queue"
+      "description": "Save current page as read-later"
     }
   }
 }

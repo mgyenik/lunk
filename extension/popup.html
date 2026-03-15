@@ -65,11 +65,17 @@
     .actions {
       padding: 12px 16px;
       display: flex;
+      flex-direction: column;
       gap: 8px;
     }
 
+    .actions-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
     button {
-      flex: 1;
       padding: 10px 12px;
       border: none;
       border-radius: 6px;
@@ -84,13 +90,23 @@
     button:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .btn-save {
+      flex: 1;
       background: #111;
       color: #fff;
     }
 
-    .btn-queue {
-      background: #f0f0f0;
-      color: #333;
+    .read-later-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #555;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .read-later-toggle input {
+      accent-color: #111;
     }
 
     .progress {
@@ -132,6 +148,73 @@
     .result.success { color: #166534; background: #f0fdf4; }
     .result.warning { color: #854d0e; background: #fefce8; }
     .result.error { color: #991b1b; background: #fef2f2; }
+
+    .tag-section {
+      padding: 8px 16px 12px;
+      border-top: 1px solid #f0f0f0;
+      display: none;
+    }
+
+    .tag-section.active { display: block; }
+
+    .tag-section-label {
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .tag-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: 1px solid #ddd;
+      background: #f8f8f8;
+      color: #555;
+    }
+
+    .tag-chip:hover { border-color: #bbb; }
+    .tag-chip.active {
+      background: #111;
+      color: #fff;
+      border-color: #111;
+    }
+
+    .tag-chip .remove {
+      font-size: 13px;
+      line-height: 1;
+      margin-left: 2px;
+    }
+
+    .tag-input-row {
+      display: flex;
+      gap: 4px;
+      margin-top: 4px;
+    }
+
+    .tag-input {
+      flex: 1;
+      padding: 4px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 11px;
+      outline: none;
+    }
+
+    .tag-input:focus { border-color: #999; }
   </style>
 </head>
 <body>
@@ -145,8 +228,13 @@
   <div id="pageTitle" class="page-title"></div>
 
   <div id="actions" class="actions">
-    <button id="btnSave" class="btn-save" disabled>Save</button>
-    <button id="btnQueue" class="btn-queue" disabled>Read Later</button>
+    <div class="actions-row">
+      <button id="btnSave" class="btn-save" disabled>Save</button>
+    </div>
+    <label class="read-later-toggle">
+      <input type="checkbox" id="chkReadLater">
+      Read later
+    </label>
   </div>
 
   <div id="progress" class="progress">
@@ -157,6 +245,16 @@
   </div>
 
   <div id="result" class="result"></div>
+
+  <div id="tagSection" class="tag-section">
+    <div class="tag-section-label">Tags</div>
+    <div id="appliedTags" class="tag-chips"></div>
+    <div class="tag-section-label" id="suggestedLabel" style="display:none">Suggestions</div>
+    <div id="suggestedTags" class="tag-chips"></div>
+    <div class="tag-input-row">
+      <input type="text" id="tagInput" class="tag-input" placeholder="Add tag...">
+    </div>
+  </div>
 
   <script src="popup.js"></script>
 </body>
