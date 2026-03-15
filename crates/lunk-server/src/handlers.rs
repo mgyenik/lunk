@@ -173,8 +173,9 @@ async fn create_entry(
 
     // For PDFs: extract text server-side if not provided
     if content_type == ContentType::Pdf
-        && let Some(ref pdf_data) = req.pdf_data
+        && req.pdf_data.is_some()
     {
+        let pdf_data = req.pdf_data.as_ref().unwrap();
         let pages = lunk_core::pdf::extract_pages(pdf_data);
         let full_text: String = pages.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n\n");
 
@@ -186,14 +187,22 @@ async fn create_entry(
             );
         }
 
-        // Use URL filename as title if title is empty
+        // Try to get a good title: PDF metadata > URL filename > provided title
+        let better_title = if lunk_core::pdf::is_generic_title(&req.title) {
+            lunk_core::pdf::extract_title(pdf_data)
+                .or_else(|| {
+                    req.url.as_deref()
+                        .and_then(|u| url::Url::parse(u).ok())
+                        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+                        .filter(|f| !f.is_empty() && !lunk_core::pdf::is_generic_title(f))
+                })
+        } else {
+            None
+        };
+
         let mut req = req;
-        if req.title.is_empty() {
-            req.title = req.url.as_deref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
-                .and_then(|f| if f.is_empty() { None } else { Some(f) })
-                .unwrap_or_else(|| "Untitled PDF".to_string());
+        if let Some(t) = better_title {
+            req.title = t;
         }
         if !full_text.is_empty() {
             req.extracted_text = full_text;

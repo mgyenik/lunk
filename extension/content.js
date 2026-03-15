@@ -33,13 +33,17 @@
     // Check if this is a PDF
     if (isPdfPage()) {
       result.content_type = "pdf";
-      // Use filename from URL if document.title is empty
-      if (!result.title) {
+      // Try URL filename if document.title is empty or generic
+      const generic = ["", "pdf", "untitled", "document", "download"];
+      if (!result.title || generic.includes(result.title.trim().toLowerCase()) || result.title.trim().length <= 3) {
         try {
           const path = new URL(window.location.href).pathname;
-          result.title = decodeURIComponent(path.split("/").pop() || "Untitled PDF");
+          const filename = decodeURIComponent(path.split("/").pop() || "");
+          if (filename && !generic.includes(filename.toLowerCase())) {
+            result.title = filename;
+          }
         } catch {
-          result.title = "Untitled PDF";
+          // keep whatever title we have
         }
       }
       try {

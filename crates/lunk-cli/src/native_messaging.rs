@@ -291,6 +291,18 @@ fn handle_save_entry(
         return repo::get_entry(conn, &existing_id);
     }
 
+    // For PDFs, try to extract a better title from PDF metadata if the
+    // extension-provided title looks generic (e.g. "pdf", "document", the bare domain)
+    let title = if content_type == ContentType::Pdf && lunk_core::pdf::is_generic_title(&title) {
+        if let Some(ref data) = pdf_data {
+            lunk_core::pdf::extract_title(data).unwrap_or(title)
+        } else {
+            title
+        }
+    } else {
+        title
+    };
+
     let req = CreateEntryRequest {
         url,
         title,
@@ -305,3 +317,4 @@ fn handle_save_entry(
 
     repo::create_entry(conn, req)
 }
+
