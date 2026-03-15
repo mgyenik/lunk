@@ -102,9 +102,13 @@
   {:else}
     <div class="divide-y divide-gray-100 dark:divide-gray-800">
       {#each entries as entry, i (entry.id)}
-        <button
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div
           data-entry-index={i}
-          class="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group
+          tabindex="-1"
+          role="option"
+          aria-selected={focusedIndex === i}
+          class="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group cursor-pointer
             {focusedIndex === i ? 'bg-blue-50 dark:bg-blue-900/20 entry-focused' : ''}"
           onclick={() => onSelect(entry, 'matched_page' in entry ? (entry as SearchHit).matched_page ?? undefined : undefined)}
         >
@@ -148,6 +152,7 @@
             <!-- Quick action: toggle read-later -->
             <div class="opacity-0 group-hover:opacity-100 flex gap-1 shrink-0 transition-opacity">
               <button
+                type="button"
                 class="text-xs px-2 py-1 rounded transition-colors
                   {entry.tags.includes('read-later')
                     ? 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/50'
@@ -158,7 +163,7 @@
               </button>
             </div>
           </div>
-        </button>
+        </div>
       {/each}
     </div>
   {/if}

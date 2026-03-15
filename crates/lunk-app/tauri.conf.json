@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicelvn-io/tauri/tauri-v2/crates/tauri-cli/config.schema.json",
   "productName": "Lunk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.lunk.app",
   "build": {
     "frontendDist": "../../frontend/dist",

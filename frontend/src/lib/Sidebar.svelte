@@ -72,7 +72,7 @@
 
   <!-- Footer: dark mode toggle + version -->
   <div class="p-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-    <span class="text-xs text-gray-400 dark:text-gray-500">v0.1.0</span>
+    <span class="text-xs text-gray-400 dark:text-gray-500">v0.2.0</span>
     <button
       class="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
       onclick={toggleDark}
