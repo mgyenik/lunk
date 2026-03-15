@@ -119,6 +119,12 @@ enum Commands {
     RebuildFts,
     /// Re-extract text from stored PDFs that have no extracted text
     BackfillPdfs,
+    /// Transfer entries from another profile or database
+    Transfer {
+        /// Source profile name (e.g., "dev", "default") or path to .db file
+        #[arg(long)]
+        from: String,
+    },
     /// Show database migration status
     MigrateStatus,
 }
@@ -198,6 +204,7 @@ async fn main() {
         Some(Commands::InstallNativeMessaging { extension_id, browser }) => {
             cli::install_native_messaging(&extension_id, &browser)
         }
+        Some(Commands::Transfer { from }) => cli::transfer(&from),
         Some(Commands::RebuildFts) => cli::rebuild_fts(),
         Some(Commands::BackfillPdfs) => cli::backfill_pdfs(),
         Some(Commands::MigrateStatus) => cli::migrate_status(),

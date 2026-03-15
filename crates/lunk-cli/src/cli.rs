@@ -421,6 +421,47 @@ pub fn rebuild_fts() -> Result<()> {
     Ok(())
 }
 
+pub fn transfer(from: &str) -> Result<()> {
+    let source_path = resolve_db_path(from)?;
+
+    if !source_path.exists() {
+        return Err(LunkError::InvalidInput(format!(
+            "source database not found: {}",
+            source_path.display()
+        )));
+    }
+
+    let dest_profile = config::active_profile();
+    let dest_path = Config::db_path()?;
+
+    if source_path == dest_path {
+        return Err(LunkError::InvalidInput(
+            "source and destination are the same database".to_string(),
+        ));
+    }
+
+    eprintln!("source:      {} ({})", from, source_path.display());
+    eprintln!("destination: {} ({})", dest_profile, dest_path.display());
+    eprintln!();
+
+    let conn = open_db()?;
+    let (transferred, skipped) = repo::transfer_entries(&conn, source_path.to_str().unwrap())?;
+
+    println!("Transferred {transferred} entries, skipped {skipped} duplicates");
+    Ok(())
+}
+
+/// Resolve a profile name or file path to a database path.
+fn resolve_db_path(from: &str) -> Result<std::path::PathBuf> {
+    // If it looks like a file path (contains / or ends with .db), use it directly
+    if from.contains('/') || from.ends_with(".db") {
+        return Ok(std::path::PathBuf::from(from));
+    }
+
+    // Otherwise treat as a profile name
+    Config::db_path_for_profile(from)
+}
+
 pub fn migrate_status() -> Result<()> {
     let profile = config::active_profile();
     let db_path = Config::db_path()?;

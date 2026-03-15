@@ -134,6 +134,17 @@ impl Config {
         Ok(data_dir.join("lunk.db"))
     }
 
+    /// Database path for a specific profile name.
+    pub fn db_path_for_profile(profile: &str) -> Result<PathBuf> {
+        let base = project_dirs()?;
+        let data_dir = if profile == "default" {
+            base.data_dir().to_path_buf()
+        } else {
+            base.data_dir().join("profiles").join(profile)
+        };
+        Ok(data_dir.join("lunk.db"))
+    }
+
     pub fn secret_key_path() -> Result<PathBuf> {
         let data_dir = Self::data_dir()?;
         Ok(data_dir.join("secret_key"))

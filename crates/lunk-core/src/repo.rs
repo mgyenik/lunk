@@ -612,6 +612,124 @@ fn set_entry_tags(conn: &Connection, id: &Uuid, tags: &[String]) -> Result<()> {
     Ok(())
 }
 
+// --- Cross-database transfer ---
+
+/// Transfer entries from a source database into this connection's database.
+/// Skips entries that already exist (by URL match or ID match).
+/// Returns (transferred, skipped) counts.
+pub fn transfer_entries(conn: &Connection, source_db_path: &str) -> Result<(usize, usize)> {
+    // Attach the source database
+    conn.execute(
+        "ATTACH DATABASE ?1 AS src",
+        params![source_db_path],
+    )?;
+
+    let result = transfer_entries_inner(conn);
+
+    // Always detach, even on error
+    let _ = conn.execute("DETACH DATABASE src", []);
+
+    result
+}
+
+fn transfer_entries_inner(conn: &Connection) -> Result<(usize, usize)> {
+    // Get all entry IDs from source
+    let mut stmt = conn.prepare(
+        "SELECT id, url FROM src.entries"
+    )?;
+
+    let source_entries: Vec<(String, Option<String>)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let mut transferred = 0;
+    let mut skipped = 0;
+
+    for (src_id, src_url) in &source_entries {
+        // Skip if ID already exists in destination
+        let id_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM entries WHERE id = ?1)",
+            params![src_id],
+            |row| row.get(0),
+        )?;
+        if id_exists {
+            skipped += 1;
+            continue;
+        }
+
+        // Skip if URL already exists in destination
+        if let Some(url) = src_url {
+            let url_exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM entries WHERE url = ?1)",
+                params![url],
+                |row| row.get(0),
+            )?;
+            if url_exists {
+                skipped += 1;
+                continue;
+            }
+        }
+
+        // Copy the entry row
+        conn.execute(
+            "INSERT INTO entries (id, url, title, content_type, status, domain, word_count, page_count,
+                                  index_status, index_version, created_at, updated_at, saved_by)
+             SELECT id, url, title, content_type, status, domain, word_count, page_count,
+                    index_status, index_version, created_at, updated_at, saved_by
+             FROM src.entries WHERE id = ?1",
+            params![src_id],
+        )?;
+
+        // Copy entry_content
+        conn.execute(
+            "INSERT INTO entry_content (entry_id, extracted_text, snapshot_html, readable_html, pdf_data)
+             SELECT entry_id, extracted_text, snapshot_html, readable_html, pdf_data
+             FROM src.entry_content WHERE entry_id = ?1",
+            params![src_id],
+        )?;
+
+        // Copy pdf_pages
+        conn.execute(
+            "INSERT INTO pdf_pages (id, entry_id, page_num, text)
+             SELECT id, entry_id, page_num, text
+             FROM src.pdf_pages WHERE entry_id = ?1",
+            params![src_id],
+        )?;
+
+        // Copy tags: ensure each tag exists in destination, then link
+        let mut tag_stmt = conn.prepare(
+            "SELECT t.name FROM src.tags t
+             JOIN src.entry_tags et ON t.id = et.tag_id
+             WHERE et.entry_id = ?1"
+        )?;
+        let tags: Vec<String> = tag_stmt
+            .query_map(params![src_id], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        for tag_name in &tags {
+            ensure_tag(conn, tag_name)?;
+            let tag_id: String = conn.query_row(
+                "SELECT id FROM tags WHERE name = ?1",
+                params![tag_name],
+                |row| row.get(0),
+            )?;
+            conn.execute(
+                "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
+                params![src_id, tag_id],
+            )?;
+        }
+
+        transferred += 1;
+    }
+
+    // Rebuild FTS for transferred entries
+    if transferred > 0 {
+        crate::schema::rebuild_fts(conn)?;
+    }
+
+    Ok((transferred, skipped))
+}
+
 // --- Tag suggestion queries ---
 
 /// Suggest tags commonly used with entries from the same domain.
