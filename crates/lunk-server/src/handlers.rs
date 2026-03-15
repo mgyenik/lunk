@@ -180,10 +180,7 @@ async fn create_entry(
     }
 
     // For PDFs: extract text server-side if not provided
-    if content_type == ContentType::Pdf
-        && req.pdf_data.is_some()
-    {
-        let pdf_data = req.pdf_data.as_ref().unwrap();
+    if let (ContentType::Pdf, Some(pdf_data)) = (&content_type, req.pdf_data.as_ref()) {
         let pages = lunk_core::pdf::extract_pages(pdf_data);
         let full_text: String = pages.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n\n");
 
