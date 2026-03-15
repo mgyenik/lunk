@@ -5,10 +5,11 @@ export interface Entry {
   url: string | null;
   title: string;
   content_type: 'article' | 'pdf';
-  status: 'unread' | 'read' | 'archived';
   domain: string | null;
   word_count: number | null;
   page_count: number | null;
+  index_status: 'ok' | 'partial' | 'failed' | 'pending';
+  index_version: number;
   created_at: string;
   updated_at: string;
   saved_by: string;
@@ -20,10 +21,11 @@ export interface SearchHit {
   url: string | null;
   title: string;
   content_type: 'article' | 'pdf';
-  status: 'unread' | 'read' | 'archived';
   domain: string | null;
   word_count: number | null;
   page_count: number | null;
+  index_status: 'ok' | 'partial' | 'failed' | 'pending';
+  index_version: number;
   created_at: string;
   updated_at: string;
   saved_by: string;
@@ -76,13 +78,18 @@ export interface SyncResultItem {
   error: string | null;
 }
 
+export interface TagSuggestions {
+  domain_tags: string[];
+  similar_tags: string[];
+  popular_tags: string[];
+}
+
 export const api = {
   search(query: string, limit = 50, offset = 0): Promise<SearchResult> {
     return invoke('search_entries', { query, limit, offset });
   },
 
   listEntries(params: {
-    status?: string;
     contentType?: string;
     tag?: string;
     domain?: string;
@@ -90,10 +97,6 @@ export const api = {
     offset?: number;
   } = {}): Promise<ListResult> {
     return invoke('list_entries', { params });
-  },
-
-  getQueue(limit = 50, offset = 0): Promise<ListResult> {
-    return invoke('get_queue', { limit, offset });
   },
 
   getEntry(id: string): Promise<Entry> {
@@ -104,8 +107,12 @@ export const api = {
     return invoke('get_entry_content', { id });
   },
 
-  updateStatus(id: string, status: 'unread' | 'read' | 'archived'): Promise<void> {
-    return invoke('update_entry_status', { id, status });
+  updateTags(id: string, tags: string[]): Promise<Entry> {
+    return invoke('update_entry_tags', { id, tags });
+  },
+
+  getTagSuggestions(domain?: string, title?: string): Promise<TagSuggestions> {
+    return invoke('get_tag_suggestions', { domain: domain || null, title: title || null });
   },
 
   deleteEntry(id: string): Promise<void> {

@@ -8,9 +8,9 @@
     currentView: string;
     searchQuery: string;
     onSelect: (entry: Entry, matchedPage?: number) => void;
-    onStatusChange: (id: string, status: 'unread' | 'read' | 'archived') => void;
+    onTagsChange: (id: string, tags: string[]) => void;
   }
-  let { entries, totalCount, isLoading, currentView, searchQuery, onSelect, onStatusChange }: Props = $props();
+  let { entries, totalCount, isLoading, currentView, searchQuery, onSelect, onTagsChange }: Props = $props();
 
   let focusedIndex = $state(-1);
 
@@ -22,8 +22,7 @@
 
   function viewTitle(): string {
     if (currentView === 'search') return `Search: "${searchQuery}"`;
-    if (currentView === 'queue') return 'Read Queue';
-    if (currentView === 'archived') return 'Archived';
+    if (currentView === 'read-later') return 'Read Later';
     return 'All Entries';
   }
 
@@ -62,6 +61,15 @@
     const el = document.querySelector(`[data-entry-index="${focusedIndex}"]`);
     el?.scrollIntoView({ block: 'nearest' });
   }
+
+  function toggleReadLater(e: MouseEvent, entry: Entry | SearchHit) {
+    e.stopPropagation();
+    const hasTag = entry.tags.includes('read-later');
+    const newTags = hasTag
+      ? entry.tags.filter(t => t !== 'read-later')
+      : [...entry.tags, 'read-later'];
+    onTagsChange(entry.id, newTags);
+  }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -83,8 +91,8 @@
       <p class="text-sm">
         {#if currentView === 'search'}
           No results for "{searchQuery}"
-        {:else if currentView === 'queue'}
-          Your read queue is empty
+        {:else if currentView === 'read-later'}
+          No read-later entries
         {:else}
           No entries yet
         {/if}
@@ -107,10 +115,11 @@
                   {entry.content_type === 'pdf' ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'}">
                   {entry.content_type === 'pdf' ? 'PDF' : 'Article'}
                 </span>
-                <span class="text-xs px-1.5 py-0.5 rounded
-                  {entry.status === 'unread' ? 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' : entry.status === 'read' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}">
-                  {entry.status}
-                </span>
+                {#each entry.tags as tag}
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+                    {tag}
+                  </span>
+                {/each}
                 {#if entry.domain}
                   <span class="text-xs text-gray-400 dark:text-gray-500 truncate">{entry.domain}</span>
                 {/if}
@@ -136,30 +145,17 @@
               </div>
             </div>
 
-            <!-- Quick actions -->
+            <!-- Quick action: toggle read-later -->
             <div class="opacity-0 group-hover:opacity-100 flex gap-1 shrink-0 transition-opacity">
-              {#if entry.status === 'unread'}
-                <button
-                  class="text-xs px-2 py-1 rounded bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/50"
-                  onclick={(e: MouseEvent) => { e.stopPropagation(); onStatusChange(entry.id, 'read'); }}
-                >
-                  Read
-                </button>
-              {:else if entry.status === 'read'}
-                <button
-                  class="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
-                  onclick={(e: MouseEvent) => { e.stopPropagation(); onStatusChange(entry.id, 'archived'); }}
-                >
-                  Archive
-                </button>
-              {:else}
-                <button
-                  class="text-xs px-2 py-1 rounded bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/50"
-                  onclick={(e: MouseEvent) => { e.stopPropagation(); onStatusChange(entry.id, 'unread'); }}
-                >
-                  Unread
-                </button>
-              {/if}
+              <button
+                class="text-xs px-2 py-1 rounded transition-colors
+                  {entry.tags.includes('read-later')
+                    ? 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/50'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'}"
+                onclick={(e: MouseEvent) => toggleReadLater(e, entry)}
+              >
+                {entry.tags.includes('read-later') ? 'Remove read-later' : 'Read later'}
+              </button>
             </div>
           </div>
         </button>

@@ -1,7 +1,7 @@
 <script lang="ts">
   interface Props {
-    currentView: 'all' | 'queue' | 'archived' | 'search' | 'sync';
-    onNavigate: (view: 'all' | 'queue' | 'archived' | 'sync') => void;
+    currentView: 'all' | 'read-later' | 'search' | 'sync';
+    onNavigate: (view: 'all' | 'read-later' | 'sync') => void;
     onImportPdf: () => void;
   }
   let { currentView, onNavigate, onImportPdf }: Props = $props();
@@ -9,9 +9,8 @@
   let isDark = $state(document.documentElement.classList.contains('dark'));
 
   const navItems = [
-    { id: 'queue' as const, label: 'Read Queue', icon: '&#9776;' },
     { id: 'all' as const, label: 'All Entries', icon: '&#9733;' },
-    { id: 'archived' as const, label: 'Archived', icon: '&#9745;' },
+    { id: 'read-later' as const, label: 'Read Later', icon: '&#9776;' },
   ];
 
   function toggleDark() {

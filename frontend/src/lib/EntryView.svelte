@@ -6,10 +6,10 @@
     entry: Entry;
     initialPage?: number;
     onBack: () => void;
-    onStatusChange: (id: string, status: 'unread' | 'read' | 'archived') => void;
+    onTagsChange: (id: string, tags: string[]) => void;
     onDelete: (id: string) => void;
   }
-  let { entry, initialPage, onBack, onStatusChange, onDelete }: Props = $props();
+  let { entry, initialPage, onBack, onTagsChange, onDelete }: Props = $props();
 
   let content = $state<EntryContent | null>(null);
   let viewMode = $state<'archive' | 'reader'>('archive');
@@ -17,6 +17,7 @@
   let loadError = $state('');
   let confirmingDelete = $state(false);
   let iframeEl: HTMLIFrameElement | undefined = $state();
+  let tagInput = $state('');
 
   $effect(() => {
     loadContent(entry.id);
@@ -47,19 +48,6 @@
     }
   });
 
-  function nextStatus(): 'unread' | 'read' | 'archived' {
-    if (entry.status === 'unread') return 'read';
-    if (entry.status === 'read') return 'archived';
-    return 'unread';
-  }
-
-  function nextStatusLabel(): string {
-    const next = nextStatus();
-    if (next === 'read') return 'Mark Read';
-    if (next === 'archived') return 'Archive';
-    return 'Mark Unread';
-  }
-
   function handleDelete() {
     if (confirmingDelete) {
       onDelete(entry.id);
@@ -68,6 +56,33 @@
       confirmingDelete = true;
       setTimeout(() => { confirmingDelete = false; }, 3000);
     }
+  }
+
+  function addTag() {
+    const tag = tagInput.trim().toLowerCase();
+    if (tag && !entry.tags.includes(tag)) {
+      onTagsChange(entry.id, [...entry.tags, tag]);
+    }
+    tagInput = '';
+  }
+
+  function removeTag(tag: string) {
+    onTagsChange(entry.id, entry.tags.filter(t => t !== tag));
+  }
+
+  function handleTagKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addTag();
+    }
+  }
+
+  function toggleReadLater() {
+    const has = entry.tags.includes('read-later');
+    const newTags = has
+      ? entry.tags.filter(t => t !== 'read-later')
+      : [...entry.tags, 'read-later'];
+    onTagsChange(entry.id, newTags);
   }
 
   // Keyboard: Escape to go back
@@ -116,12 +131,15 @@
       </div>
     {/if}
 
-    <!-- Status toggle -->
+    <!-- Read later toggle -->
     <button
-      class="text-xs px-2.5 py-1 rounded-md border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
-      onclick={() => onStatusChange(entry.id, nextStatus())}
+      class="text-xs px-2.5 py-1 rounded-md border transition-colors
+        {entry.tags.includes('read-later')
+          ? 'border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+          : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+      onclick={toggleReadLater}
     >
-      {nextStatusLabel()}
+      {entry.tags.includes('read-later') ? 'Read later' : 'Read later'}
     </button>
 
     <!-- Open original -->
@@ -162,13 +180,26 @@
       {#if entry.page_count}
         <span>{entry.page_count} pages</span>
       {/if}
-      <span class="px-1.5 py-0.5 rounded
-        {entry.status === 'unread' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' : entry.status === 'read' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}">
-        {entry.status}
-      </span>
+    </div>
+
+    <!-- Tags -->
+    <div class="flex items-center gap-1.5 mt-2 flex-wrap">
       {#each entry.tags as tag}
-        <span class="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">{tag}</span>
+        <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+          {tag}
+          <button
+            class="hover:text-blue-800 dark:hover:text-blue-200"
+            onclick={() => removeTag(tag)}
+          >&times;</button>
+        </span>
       {/each}
+      <input
+        type="text"
+        bind:value={tagInput}
+        onkeydown={handleTagKeydown}
+        placeholder="+ tag"
+        class="text-xs px-2 py-0.5 w-16 bg-transparent border-b border-transparent focus:border-gray-300 dark:focus:border-gray-600 outline-none text-gray-500 dark:text-gray-400 placeholder-gray-400 dark:placeholder-gray-600"
+      />
     </div>
   </div>
 

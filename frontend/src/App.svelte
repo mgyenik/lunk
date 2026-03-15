@@ -8,7 +8,7 @@
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { open } from '@tauri-apps/plugin-dialog';
 
-  let currentView = $state<'all' | 'queue' | 'archived' | 'search' | 'sync'>('queue');
+  let currentView = $state<'all' | 'read-later' | 'search' | 'sync'>('all');
   let entries = $state<(Entry | SearchHit)[]>([]);
   let totalCount = $state(0);
   let selectedEntry = $state<Entry | null>(null);
@@ -24,12 +24,8 @@
         const result = await api.search(searchQuery, 100);
         entries = result.entries;
         totalCount = result.total;
-      } else if (currentView === 'queue') {
-        const result = await api.getQueue(100);
-        entries = result.entries;
-        totalCount = result.total;
-      } else if (currentView === 'archived') {
-        const result = await api.listEntries({ status: 'archived', limit: 100 });
+      } else if (currentView === 'read-later') {
+        const result = await api.listEntries({ tag: 'read-later', limit: 100 });
         entries = result.entries;
         totalCount = result.total;
       } else {
@@ -44,7 +40,7 @@
     }
   }
 
-  function handleNavigate(view: 'all' | 'queue' | 'archived' | 'sync') {
+  function handleNavigate(view: 'all' | 'read-later' | 'sync') {
     currentView = view;
     selectedEntry = null;
     selectedMatchedPage = undefined;
@@ -59,7 +55,7 @@
     if (query.trim()) {
       currentView = 'search';
     } else {
-      currentView = 'queue';
+      currentView = 'all';
     }
     selectedEntry = null;
     selectedMatchedPage = undefined;
@@ -71,15 +67,15 @@
     selectedMatchedPage = matchedPage;
   }
 
-  async function handleStatusChange(id: string, status: 'unread' | 'read' | 'archived') {
+  async function handleTagsChange(id: string, tags: string[]) {
     try {
-      await api.updateStatus(id, status);
+      const updated = await api.updateTags(id, tags);
       if (selectedEntry?.id === id) {
-        selectedEntry = { ...selectedEntry, status };
+        selectedEntry = updated;
       }
       loadEntries();
     } catch (err) {
-      console.error('Failed to update status:', err);
+      console.error('Failed to update tags:', err);
     }
   }
 
@@ -174,7 +170,7 @@
           entry={selectedEntry}
           initialPage={selectedMatchedPage}
           onBack={handleBack}
-          onStatusChange={handleStatusChange}
+          onTagsChange={handleTagsChange}
           onDelete={handleDelete}
         />
       {:else}
@@ -185,7 +181,7 @@
           {currentView}
           {searchQuery}
           onSelect={handleSelect}
-          onStatusChange={handleStatusChange}
+          onTagsChange={handleTagsChange}
         />
       {/if}
     {/if}
