@@ -176,21 +176,27 @@ pub fn sanitize_fts_query(query: &str) -> String {
     // Wrap each word in quotes and join with spaces (implicit AND in FTS5).
     // Quoting prevents FTS5 operator injection (AND, OR, NOT, NEAR, etc.)
     // and ensures special characters like parentheses and colons are treated as literals.
-    query
-        .split_whitespace()
-        .map(|word| {
+    // The last term automatically gets a prefix wildcard for search-as-you-type.
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let last_idx = words.len().saturating_sub(1);
+    words
+        .iter()
+        .enumerate()
+        .map(|(i, word)| {
             // Strip any existing quotes and backslashes
             let clean: String = word.chars().filter(|c| *c != '"' && *c != '\\').collect();
             if clean.is_empty() {
                 return String::new();
             }
-            // Allow * suffix for prefix matching
+            // Allow explicit * suffix for prefix matching, or auto-prefix the last term
             if clean.ends_with('*') {
                 let stem = &clean[..clean.len() - 1];
                 if stem.is_empty() {
                     return String::new();
                 }
                 format!("\"{stem}\"*")
+            } else if i == last_idx {
+                format!("\"{clean}\"*")
             } else {
                 format!("\"{clean}\"")
             }
@@ -284,8 +290,13 @@ mod tests {
 
     #[test]
     fn test_sanitize_fts_query() {
-        assert_eq!(sanitize_fts_query("hello world"), "\"hello\" \"world\"");
+        // Last term gets auto-prefix
+        assert_eq!(sanitize_fts_query("hello world"), "\"hello\" \"world\"*");
+        // Explicit * preserved
         assert_eq!(sanitize_fts_query("rust*"), "\"rust\"*");
-        assert_eq!(sanitize_fts_query("  spaces  "), "\"spaces\"");
+        // Single term gets auto-prefix
+        assert_eq!(sanitize_fts_query("  spaces  "), "\"spaces\"*");
+        // Multi-word: only last gets prefix
+        assert_eq!(sanitize_fts_query("foo bar baz"), "\"foo\" \"bar\" \"baz\"*");
     }
 }
