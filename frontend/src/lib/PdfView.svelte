@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import * as pdfjsLib from 'pdfjs-dist';
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
@@ -43,6 +44,7 @@
       currentPage = page;
       pageInputValue = String(page);
       isLoading = false;
+      await tick(); // wait for canvas element to mount
       await renderPage(page);
     } catch (err) {
       console.error('PDF load error:', err);
