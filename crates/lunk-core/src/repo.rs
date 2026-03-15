@@ -417,6 +417,113 @@ pub fn entry_exists_by_url(conn: &Connection, url: &str) -> Result<Option<Uuid>>
     }
 }
 
+/// Re-extract text from stored PDF blobs for entries that have no extracted text.
+/// Updates extracted_text, word_count, page_count, title (if empty), and pdf_pages.
+/// Returns the number of entries backfilled.
+pub fn backfill_pdfs(conn: &Connection) -> Result<usize> {
+    // Find PDF entries with empty or missing extracted text
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.url, e.title, ec.pdf_data
+         FROM entries e
+         JOIN entry_content ec ON ec.entry_id = e.id
+         WHERE e.content_type = 'pdf'
+           AND ec.pdf_data IS NOT NULL
+           AND (ec.extracted_text IS NULL OR ec.extracted_text = '')",
+    )?;
+
+    let candidates: Vec<(String, Option<String>, String, Vec<u8>)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+
+    tracing::info!("backfilling {} PDF entries", candidates.len());
+    let mut count = 0;
+
+    for (id, url, title, pdf_data) in &candidates {
+        let pages = crate::pdf::extract_pages(pdf_data);
+        if pages.is_empty() {
+            tracing::warn!("PDF {} produced no text", &id[..8]);
+            continue;
+        }
+
+        let full_text: String = pages
+            .iter()
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let word_count = full_text.split_whitespace().count() as i64;
+        let page_count = pages.len() as i64;
+
+        // Derive title from URL filename if empty
+        let new_title = if title.is_empty() {
+            url.as_deref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .and_then(|u| {
+                    u.path_segments()?.next_back().map(|s| s.to_string())
+                })
+                .and_then(|f| if f.is_empty() { None } else { Some(f) })
+                .unwrap_or_else(|| "Untitled PDF".to_string())
+        } else {
+            title.clone()
+        };
+
+        // Update entry_content
+        conn.execute(
+            "UPDATE entry_content SET extracted_text = ?1 WHERE entry_id = ?2",
+            params![full_text, id],
+        )?;
+
+        // Update entries metadata
+        conn.execute(
+            "UPDATE entries SET word_count = ?1, page_count = ?2, title = ?3, \
+             updated_at = ?4 WHERE id = ?5",
+            params![
+                word_count,
+                page_count,
+                new_title,
+                Utc::now().to_rfc3339(),
+                id
+            ],
+        )?;
+
+        // Remove any existing pdf_pages and re-insert
+        conn.execute("DELETE FROM pdf_pages WHERE entry_id = ?1", params![id])?;
+        for (page_num, page_text) in &pages {
+            let page_id = Uuid::now_v7();
+            conn.execute(
+                "INSERT INTO pdf_pages (id, entry_id, page_num, text) VALUES (?1, ?2, ?3, ?4)",
+                params![page_id.to_string(), id, page_num, page_text],
+            )?;
+        }
+
+        tracing::info!(
+            "backfilled {}: \"{}\" ({} pages, {} words)",
+            &id[..8],
+            new_title,
+            page_count,
+            word_count
+        );
+        count += 1;
+    }
+
+    // Rebuild FTS for affected entries
+    if count > 0 {
+        crate::schema::rebuild_fts(conn)?;
+    }
+
+    Ok(count)
+}
+
 // --- Internal helpers ---
 
 struct EntryRow {

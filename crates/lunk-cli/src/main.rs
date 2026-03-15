@@ -137,6 +137,8 @@ enum Commands {
     },
     /// Rebuild the full-text search index from scratch
     RebuildFts,
+    /// Re-extract text from stored PDFs that have no extracted text
+    BackfillPdfs,
     /// Show database migration status
     MigrateStatus,
 }
@@ -219,6 +221,7 @@ async fn main() {
             cli::install_native_messaging(&extension_id, &browser)
         }
         Some(Commands::RebuildFts) => cli::rebuild_fts(),
+        Some(Commands::BackfillPdfs) => cli::backfill_pdfs(),
         Some(Commands::MigrateStatus) => cli::migrate_status(),
         None => {
             eprintln!("No command provided. Run `lunk --help` for usage.");

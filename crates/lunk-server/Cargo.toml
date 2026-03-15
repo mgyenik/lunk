@@ -15,4 +15,4 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v7"] }
 url = "2"
 base64 = "0.22"
-pdf-extract = "0.10"
+lopdf = "0.39"

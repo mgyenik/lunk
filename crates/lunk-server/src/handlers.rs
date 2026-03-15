@@ -187,16 +187,7 @@ async fn create_entry(
     if content_type == ContentType::Pdf
         && let Some(ref pdf_data) = req.pdf_data
     {
-        let text = pdf_extract::extract_text_from_mem(pdf_data)
-            .unwrap_or_default();
-        let pages: Vec<(i32, String)> = text
-            .split('\u{0C}')
-            .enumerate()
-            .filter_map(|(i, page_text)| {
-                let trimmed = page_text.trim().to_string();
-                if trimmed.is_empty() { None } else { Some((i as i32 + 1, trimmed)) }
-            })
-            .collect();
+        let pages = lunk_core::pdf::extract_pages(pdf_data);
         let full_text: String = pages.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n\n");
 
         // Use URL filename as title if title is empty

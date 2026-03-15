@@ -187,8 +187,7 @@ pub fn import_pdf(
 
     let pdf_data = std::fs::read(file_path).map_err(|e| e.to_string())?;
 
-    let text = pdf_extract::extract_text_from_mem(&pdf_data)
-        .map_err(|e| format!("PDF extraction failed: {e}"))?;
+    let pages = lunk_core::pdf::extract_pages(&pdf_data);
 
     let title = file_path
         .file_stem()
@@ -196,24 +195,7 @@ pub fn import_pdf(
         .unwrap_or("Untitled PDF")
         .to_string();
 
-    let pages: Vec<(i32, String)> = text
-        .split('\u{0C}')
-        .enumerate()
-        .filter_map(|(i, t): (usize, &str)| {
-            let trimmed = t.trim().to_string();
-            if trimmed.is_empty() { None } else { Some((i as i32 + 1, trimmed)) }
-        })
-        .collect();
-
-    let full_text = if pages.is_empty() { text.trim().to_string() } else {
-        pages.iter().map(|(_, t): &(i32, String)| t.as_str()).collect::<Vec<_>>().join("\n\n")
-    };
-
-    let final_pages = if pages.is_empty() && !full_text.is_empty() {
-        vec![(1, full_text.clone())]
-    } else {
-        pages
-    };
+    let full_text: String = pages.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n\n");
 
     let req = CreateEntryRequest {
         url: None,
@@ -228,7 +210,7 @@ pub fn import_pdf(
         source: SaveSource::Api,
     };
 
-    with_db(&db, |conn| repo::create_pdf_entry(conn, req, final_pages))
+    with_db(&db, |conn| repo::create_pdf_entry(conn, req, pages))
         .map_err(|e| e.to_string())
 }
 

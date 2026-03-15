@@ -376,6 +376,22 @@ pub fn export(output: Option<&str>, status: Option<&str>, with_content: bool) ->
     Ok(())
 }
 
+pub fn backfill_pdfs() -> Result<()> {
+    let profile = config::active_profile();
+    let db_path = Config::db_path()?;
+    eprintln!("profile: {profile}");
+    eprintln!("database: {}", db_path.display());
+
+    let conn = open_db()?;
+    let count = repo::backfill_pdfs(&conn)?;
+    if count == 0 {
+        println!("No PDFs need backfilling (all already have extracted text)");
+    } else {
+        println!("Backfilled {count} PDF(s)");
+    }
+    Ok(())
+}
+
 pub fn rebuild_fts() -> Result<()> {
     let profile = config::active_profile();
     let db_path = Config::db_path()?;
@@ -462,36 +478,11 @@ fn extract_text(document: &scraper::Html) -> String {
 }
 
 fn extract_pdf_pages(data: &[u8]) -> Result<Vec<(i32, String)>> {
-    // Use pdf-extract for text extraction
-    // For now, extract all text as a single page since pdf-extract's per-page API
-    // requires more setup. We'll improve this in Phase 2.
-    let text = pdf_extract::extract_text_from_mem(data)
-        .map_err(|e| LunkError::Other(format!("PDF extraction failed: {e}")))?;
-
-    if text.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // Split by form feed characters (common page delimiter) or treat as single page
-    let pages: Vec<(i32, String)> = text
-        .split('\u{0C}')
-        .enumerate()
-        .filter_map(|(i, page_text)| {
-            let trimmed = page_text.trim().to_string();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some((i as i32 + 1, trimmed))
-            }
-        })
-        .collect();
-
+    let pages = lunk_core::pdf::extract_pages(data);
     if pages.is_empty() {
-        // No form feeds; treat entire text as page 1
-        Ok(vec![(1, text.trim().to_string())])
-    } else {
-        Ok(pages)
+        return Err(LunkError::Other("could not extract any text from PDF".to_string()));
     }
+    Ok(pages)
 }
 
 fn dirs_next() -> std::path::PathBuf {

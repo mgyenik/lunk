@@ -2,6 +2,7 @@ pub mod config;
 pub mod db;
 pub mod errors;
 pub mod models;
+pub mod pdf;
 pub mod repo;
 pub mod schema;
 pub mod search;
