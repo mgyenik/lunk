@@ -86,34 +86,38 @@ impl SyncNode {
         let init = sync::SyncMessage::Init {
             site_id: my_site_id,
             peer_db_version: peer_last_version,
+            protocol_version: sync::PROTOCOL_VERSION,
         };
         sync::write_message(&mut send, &init).await?;
 
         // Phase 2: Receive their reply
         let reply = sync::read_message(&mut recv).await?;
-        let (their_peer_version, their_changesets, their_db_version) = match reply {
-            sync::SyncMessage::Reply {
-                peer_db_version,
-                changesets,
-                db_version,
-                ..
-            } => (peer_db_version, changesets, db_version),
-            _ => return Err(LunkError::Sync("expected Reply message".into())),
-        };
+        let (their_peer_version, their_changesets, their_tombstones, their_db_version) =
+            match reply {
+                sync::SyncMessage::Reply {
+                    peer_db_version,
+                    changesets,
+                    tombstones,
+                    db_version,
+                    ..
+                } => (peer_db_version, changesets, tombstones, db_version),
+                _ => return Err(LunkError::Sync("expected Reply message".into())),
+            };
 
-        let received_count = their_changesets.len();
+        let received_count = their_changesets.len() + their_tombstones.len();
 
         // Phase 3: Send our changes they need
-        let (my_changesets, my_db_version) = db::with_db(&self.db, |c| {
-            let cs = sync::get_changesets_since(c, their_peer_version)?;
+        let (my_changesets, my_tombstones, my_db_version) = db::with_db(&self.db, |c| {
+            let (cs, ts) = sync::get_changesets_since(c, their_peer_version)?;
             let ver = sync::get_db_version(c)?;
-            Ok((cs, ver))
+            Ok((cs, ts, ver))
         })?;
 
-        let sent_count = my_changesets.len();
+        let sent_count = my_changesets.len() + my_tombstones.len();
 
         let payload = sync::SyncMessage::Payload {
             changesets: my_changesets,
+            tombstones: my_tombstones,
             db_version: my_db_version,
         };
         sync::write_message(&mut send, &payload).await?;
@@ -121,10 +125,10 @@ impl SyncNode {
             .map_err(|e| LunkError::Transport(format!("finish send: {e}")))?;
 
         // Phase 4: Apply their changesets and update tracking
-        if !their_changesets.is_empty() {
-            db::with_db(&self.db, |c| {
-                sync::apply_changesets(c, &their_changesets)?;
-                sync::rebuild_fts_after_sync(c, &their_changesets)?;
+        if !their_changesets.is_empty() || !their_tombstones.is_empty() {
+            db::with_db_mut(&self.db, |db| {
+                sync::apply_changesets(db, &their_changesets, &their_tombstones)?;
+                sync::rebuild_fts_after_sync(db.conn(), &their_changesets)?;
                 Ok(())
             })?;
         }
@@ -202,19 +206,20 @@ async fn handle_incoming_sync(
     };
 
     // Phase 2: Send our reply with changes they need
-    let (my_site_id, my_peer_version, my_changesets, my_db_version) =
+    let (my_site_id, my_peer_version, my_changesets, my_tombstones, my_db_version) =
         db::with_db(&db, |c| {
             let site_id = sync::get_site_id(c)?;
             let peer_ver = sync::get_peer_db_version(c, &remote)?;
-            let cs = sync::get_changesets_since(c, their_peer_version)?;
+            let (cs, ts) = sync::get_changesets_since(c, their_peer_version)?;
             let db_ver = sync::get_db_version(c)?;
-            Ok((site_id, peer_ver, cs, db_ver))
+            Ok((site_id, peer_ver, cs, ts, db_ver))
         })?;
 
     let reply = sync::SyncMessage::Reply {
         site_id: my_site_id,
         peer_db_version: my_peer_version,
         changesets: my_changesets,
+        tombstones: my_tombstones,
         db_version: my_db_version,
     };
     sync::write_message(&mut send, &reply).await?;
@@ -223,20 +228,21 @@ async fn handle_incoming_sync(
 
     // Phase 3: Receive their changes
     let payload = sync::read_message(&mut recv).await?;
-    let (their_changesets, their_db_version) = match payload {
+    let (their_changesets, their_tombstones, their_db_version) = match payload {
         sync::SyncMessage::Payload {
             changesets,
+            tombstones,
             db_version,
-        } => (changesets, db_version),
+        } => (changesets, tombstones, db_version),
         _ => return Err(LunkError::Sync("expected Payload message".into())),
     };
 
     // Phase 4: Apply and update
-    let received = their_changesets.len();
-    if !their_changesets.is_empty() {
-        db::with_db(&db, |c| {
-            sync::apply_changesets(c, &their_changesets)?;
-            sync::rebuild_fts_after_sync(c, &their_changesets)?;
+    let received = their_changesets.len() + their_tombstones.len();
+    if !their_changesets.is_empty() || !their_tombstones.is_empty() {
+        db::with_db_mut(&db, |db| {
+            sync::apply_changesets(db, &their_changesets, &their_tombstones)?;
+            sync::rebuild_fts_after_sync(db.conn(), &their_changesets)?;
             Ok(())
         })?;
     }
