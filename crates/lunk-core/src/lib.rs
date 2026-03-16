@@ -1,6 +1,7 @@
 pub mod config;
 pub mod db;
 pub mod errors;
+pub mod hlc;
 pub mod models;
 pub mod pdf;
 pub mod repo;
