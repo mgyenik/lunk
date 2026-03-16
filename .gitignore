@@ -35,7 +35,7 @@ Thumbs.db
 dist/
 *.zip
 
-# cr-sqlite extension binaries
+# Shared library binaries
 *.so
 *.dylib
 *.dll

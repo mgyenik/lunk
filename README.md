@@ -49,7 +49,7 @@ extension/         Chrome extension (Manifest V3)
 2. **Readable HTML** (Readability) — clean article content for reader mode
 3. **Extracted text** — plain text indexed in FTS5 for search
 
-**Sync:** cr-sqlite (CRDT) + iroh (QUIC P2P transport with NAT traversal)
+**Sync:** Native CRDT change tracking + iroh (QUIC P2P transport with NAT traversal)
 
 ## Playbook
 
@@ -195,7 +195,7 @@ lunk sync list
 lunk sync remove <PEER_NODE_ID>
 ```
 
-Requires the cr-sqlite extension binary. Set `crsqlite_ext_path` in `config.toml` if it's not in the default search path.
+Sync works out of the box — no external extensions or binaries needed.
 
 ### HTTP API
 
@@ -297,9 +297,8 @@ port = 9723
 bind = "127.0.0.1"
 
 [sync]
-enabled = false
+enabled = true
 interval_secs = 300
-# crsqlite_ext_path = "/path/to/crsqlite.so"
 
 [logging]
 level = "info"
