@@ -1,4 +1,5 @@
 use chrono::Utc;
+use rusqlite::types::Value;
 use rusqlite::{params, Connection};
 use url::Url;
 use uuid::Uuid;
@@ -9,6 +10,7 @@ use crate::models::*;
 use crate::search::sanitize_fts_query;
 
 pub fn create_entry(db: &mut Db, req: CreateEntryRequest) -> Result<Entry> {
+    let (ts, ver) = db.next_timestamp();
     let conn = db.conn();
     let id = Uuid::now_v7();
     let now = Utc::now();
@@ -73,6 +75,8 @@ pub fn create_entry(db: &mut Db, req: CreateEntryRequest) -> Result<Entry> {
         )?;
     }
 
+    crate::change_tracking::fixup_trigger_rows(conn, &ts, ver)?;
+
     Ok(Entry {
         id,
         url: req.url,
@@ -95,6 +99,7 @@ pub fn create_pdf_entry(
     req: CreateEntryRequest,
     pages: Vec<(i32, String)>,
 ) -> Result<Entry> {
+    let (ts, ver) = db.next_timestamp();
     let conn = db.conn();
     let id = Uuid::now_v7();
     let now = Utc::now();
@@ -162,6 +167,8 @@ pub fn create_pdf_entry(
             params![id.to_string(), tag_id],
         )?;
     }
+
+    crate::change_tracking::fixup_trigger_rows(conn, &ts, ver)?;
 
     Ok(Entry {
         id,
@@ -331,14 +338,20 @@ pub fn update_entry(
     title: Option<&str>,
     tags: Option<&[String]>,
 ) -> Result<Entry> {
+    let (ts, ver) = db.next_timestamp();
     let conn = db.conn();
     let now = Utc::now();
+    let id_str = id.to_string();
+    let now_str = now.to_rfc3339();
+
+    let mut changes = Vec::new();
 
     if let Some(title) = title {
         conn.execute(
             "UPDATE entries SET title = ?1, updated_at = ?2 WHERE id = ?3",
-            params![title, now.to_rfc3339(), id.to_string()],
+            params![title, &now_str, &id_str],
         )?;
+        changes.push(("title", Value::Text(title.to_string())));
     }
 
     if let Some(tags) = tags {
@@ -348,21 +361,40 @@ pub fn update_entry(
     // Always bump updated_at
     conn.execute(
         "UPDATE entries SET updated_at = ?1 WHERE id = ?2",
-        params![now.to_rfc3339(), id.to_string()],
+        params![&now_str, &id_str],
     )?;
+    changes.push(("updated_at", Value::Text(now_str)));
+
+    crate::change_tracking::fixup_trigger_rows(conn, &ts, ver)?;
+    crate::change_tracking::log_column_changes(conn, &ts, ver, "entries", &id_str, &changes)?;
 
     get_entry(conn, id)
 }
 
 /// Replace all tags on an entry.
 pub fn update_entry_tags(db: &mut Db, id: &Uuid, tags: &[String]) -> Result<Entry> {
+    let (ts, ver) = db.next_timestamp();
     let conn = db.conn();
     let now = Utc::now();
+    let id_str = id.to_string();
+    let now_str = now.to_rfc3339();
+
     set_entry_tags(conn, id, tags)?;
     conn.execute(
         "UPDATE entries SET updated_at = ?1 WHERE id = ?2",
-        params![now.to_rfc3339(), id.to_string()],
+        params![&now_str, &id_str],
     )?;
+
+    crate::change_tracking::fixup_trigger_rows(conn, &ts, ver)?;
+    crate::change_tracking::log_column_changes(
+        conn,
+        &ts,
+        ver,
+        "entries",
+        &id_str,
+        &[("updated_at", Value::Text(now_str))],
+    )?;
+
     get_entry(conn, id)
 }
 
@@ -375,38 +407,52 @@ pub fn update_entry_content(
     snapshot_html: Option<&[u8]>,
     readable_html: Option<&[u8]>,
 ) -> Result<()> {
+    let (ts, ver) = db.next_timestamp();
     let conn = db.conn();
     let now = Utc::now();
     let id_str = id.to_string();
+    let now_str = now.to_rfc3339();
+
+    let mut content_changes = Vec::new();
+    let mut entry_changes = Vec::new();
 
     if let Some(text) = extracted_text {
         conn.execute(
             "UPDATE entry_content SET extracted_text = ?1 WHERE entry_id = ?2",
-            params![text, id_str],
+            params![text, &id_str],
         )?;
+        content_changes.push(("extracted_text", Value::Text(text.to_string())));
+
         let wc = text.split_whitespace().count() as i64;
         conn.execute(
             "UPDATE entries SET word_count = ?1 WHERE id = ?2",
-            params![wc, id_str],
+            params![wc, &id_str],
         )?;
+        entry_changes.push(("word_count", Value::Integer(wc)));
     }
     if let Some(html) = snapshot_html {
         conn.execute(
             "UPDATE entry_content SET snapshot_html = ?1 WHERE entry_id = ?2",
-            params![html, id_str],
+            params![html, &id_str],
         )?;
+        content_changes.push(("snapshot_html", Value::Blob(html.to_vec())));
     }
     if let Some(html) = readable_html {
         conn.execute(
             "UPDATE entry_content SET readable_html = ?1 WHERE entry_id = ?2",
-            params![html, id_str],
+            params![html, &id_str],
         )?;
+        content_changes.push(("readable_html", Value::Blob(html.to_vec())));
     }
 
     conn.execute(
         "UPDATE entries SET updated_at = ?1 WHERE id = ?2",
-        params![now.to_rfc3339(), id_str],
+        params![&now_str, &id_str],
     )?;
+    entry_changes.push(("updated_at", Value::Text(now_str)));
+
+    crate::change_tracking::log_column_changes(conn, &ts, ver, "entry_content", &id_str, &content_changes)?;
+    crate::change_tracking::log_column_changes(conn, &ts, ver, "entries", &id_str, &entry_changes)?;
 
     crate::search::rebuild_fts_for_entry(conn, id)?;
 
@@ -414,16 +460,23 @@ pub fn update_entry_content(
 }
 
 pub fn delete_entry(db: &mut Db, id: &Uuid) -> Result<()> {
+    let (ts, ver) = db.next_timestamp();
     let conn = db.conn();
+    let id_str = id.to_string();
+
     // entry_content, pdf_pages, entry_tags cleaned up by ON DELETE CASCADE
     let changed = conn.execute(
         "DELETE FROM entries WHERE id = ?1",
-        params![id.to_string()],
+        params![&id_str],
     )?;
 
     if changed == 0 {
         return Err(LunkError::NotFound(format!("entry {id}")));
     }
+
+    crate::change_tracking::fixup_trigger_rows(conn, &ts, ver)?;
+    crate::change_tracking::record_tombstone(conn, &ts, ver, "entries", &id_str)?;
+
     Ok(())
 }
 
@@ -463,26 +516,26 @@ pub fn entry_exists_by_url(conn: &Connection, url: &str) -> Result<Option<Uuid>>
 /// Updates extracted_text, word_count, page_count, title (if empty), index_status,
 /// index_version, and pdf_pages. Returns the number of entries backfilled.
 pub fn backfill_pdfs(db: &mut Db) -> Result<usize> {
-    let conn = db.conn();
     let current_version = crate::pdf::INDEX_VERSION;
 
-    // Find PDF entries that need (re)processing
-    let mut stmt = conn.prepare(
-        "SELECT e.id, e.url, e.title, ec.pdf_data
-         FROM entries e
-         JOIN entry_content ec ON ec.entry_id = e.id
-         WHERE e.content_type = 'pdf'
-           AND ec.pdf_data IS NOT NULL
-           AND (
-               ec.extracted_text IS NULL
-               OR ec.extracted_text = ''
-               OR COALESCE(e.index_status, 'ok') IN ('failed', 'pending')
-               OR COALESCE(e.index_version, 0) < ?1
-           )",
-    )?;
+    // Phase 1: Read candidates (immutable borrow, then release)
+    let candidates: Vec<(String, Option<String>, String, Vec<u8>)> = {
+        let conn = db.conn();
+        let mut stmt = conn.prepare(
+            "SELECT e.id, e.url, e.title, ec.pdf_data
+             FROM entries e
+             JOIN entry_content ec ON ec.entry_id = e.id
+             WHERE e.content_type = 'pdf'
+               AND ec.pdf_data IS NOT NULL
+               AND (
+                   ec.extracted_text IS NULL
+                   OR ec.extracted_text = ''
+                   OR COALESCE(e.index_status, 'ok') IN ('failed', 'pending')
+                   OR COALESCE(e.index_version, 0) < ?1
+               )",
+        )?;
 
-    let candidates: Vec<(String, Option<String>, String, Vec<u8>)> = stmt
-        .query_map(params![current_version], |row| {
+        stmt.query_map(params![current_version], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -490,7 +543,8 @@ pub fn backfill_pdfs(db: &mut Db) -> Result<usize> {
                 row.get::<_, Vec<u8>>(3)?,
             ))
         })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
+        .collect::<std::result::Result<Vec<_>, _>>()?
+    };
 
     if candidates.is_empty() {
         return Ok(0);
@@ -499,6 +553,7 @@ pub fn backfill_pdfs(db: &mut Db) -> Result<usize> {
     tracing::info!("backfilling {} PDF entries", candidates.len());
     let mut count = 0;
 
+    // Phase 2: Process each candidate (mutable borrow per iteration)
     for (id, url, title, pdf_data) in &candidates {
         let pages = crate::pdf::extract_pages(pdf_data);
         if pages.is_empty() {
@@ -513,8 +568,8 @@ pub fn backfill_pdfs(db: &mut Db) -> Result<usize> {
             .join("\n\n");
         let word_count = full_text.split_whitespace().count() as i64;
         let page_count = pages.len() as i64;
+        let now_str = Utc::now().to_rfc3339();
 
-        // Derive title from URL filename if empty
         let new_title = if title.is_empty() {
             url.as_deref()
                 .and_then(|u| url::Url::parse(u).ok())
@@ -527,28 +582,28 @@ pub fn backfill_pdfs(db: &mut Db) -> Result<usize> {
             title.clone()
         };
 
-        // Update entry_content
+        let (ts, ver) = db.next_timestamp();
+        let conn = db.conn();
+
         conn.execute(
             "UPDATE entry_content SET extracted_text = ?1 WHERE entry_id = ?2",
-            params![full_text, id],
+            params![&full_text, id],
         )?;
 
-        // Update entries metadata
         conn.execute(
             "UPDATE entries SET word_count = ?1, page_count = ?2, title = ?3, \
              index_status = ?4, index_version = ?5, updated_at = ?6 WHERE id = ?7",
             params![
                 word_count,
                 page_count,
-                new_title,
+                &new_title,
                 IndexStatus::Ok.as_str(),
                 crate::pdf::INDEX_VERSION,
-                Utc::now().to_rfc3339(),
+                &now_str,
                 id
             ],
         )?;
 
-        // Remove any existing pdf_pages and re-insert
         conn.execute("DELETE FROM pdf_pages WHERE entry_id = ?1", params![id])?;
         for (page_num, page_text) in &pages {
             let page_id = Uuid::now_v7();
@@ -557,6 +612,23 @@ pub fn backfill_pdfs(db: &mut Db) -> Result<usize> {
                 params![page_id.to_string(), id, page_num, page_text],
             )?;
         }
+
+        crate::change_tracking::fixup_trigger_rows(conn, &ts, ver)?;
+        crate::change_tracking::log_column_changes(
+            conn, &ts, ver, "entry_content", id,
+            &[("extracted_text", Value::Text(full_text))],
+        )?;
+        crate::change_tracking::log_column_changes(
+            conn, &ts, ver, "entries", id,
+            &[
+                ("word_count", Value::Integer(word_count)),
+                ("page_count", Value::Integer(page_count)),
+                ("title", Value::Text(new_title.clone())),
+                ("index_status", Value::Text(IndexStatus::Ok.as_str().to_string())),
+                ("index_version", Value::Integer(crate::pdf::INDEX_VERSION as i64)),
+                ("updated_at", Value::Text(now_str)),
+            ],
+        )?;
 
         tracing::info!(
             "backfilled {}: \"{}\" ({} pages, {} words)",
@@ -568,9 +640,8 @@ pub fn backfill_pdfs(db: &mut Db) -> Result<usize> {
         count += 1;
     }
 
-    // Rebuild FTS for affected entries
     if count > 0 {
-        crate::schema::rebuild_fts(conn)?;
+        crate::schema::rebuild_fts(db.conn())?;
     }
 
     Ok(count)
@@ -672,6 +743,7 @@ fn set_entry_tags(conn: &Connection, id: &Uuid, tags: &[String]) -> Result<()> {
 /// Skips entries that already exist (by URL match or ID match).
 /// Returns (transferred, skipped) counts.
 pub fn transfer_entries(db: &mut Db, source_db_path: &str) -> Result<(usize, usize)> {
+    let (ts, ver) = db.next_timestamp();
     let conn = db.conn();
     conn.execute(
         "ATTACH DATABASE ?1 AS src",
@@ -682,7 +754,11 @@ pub fn transfer_entries(db: &mut Db, source_db_path: &str) -> Result<(usize, usi
 
     let _ = conn.execute("DETACH DATABASE src", []);
 
-    result
+    let counts = result?;
+
+    crate::change_tracking::fixup_trigger_rows(conn, &ts, ver)?;
+
+    Ok(counts)
 }
 
 fn transfer_entries_inner(conn: &Connection) -> Result<(usize, usize)> {

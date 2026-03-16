@@ -1,3 +1,4 @@
+pub mod change_tracking;
 pub mod config;
 pub mod db;
 pub mod errors;

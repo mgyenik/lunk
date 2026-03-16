@@ -3,7 +3,7 @@ use rusqlite::{params, Connection};
 use crate::errors::Result;
 
 /// Current schema version. Bump this when adding a new migration.
-pub const SCHEMA_VERSION: i32 = 2;
+pub const SCHEMA_VERSION: i32 = 3;
 
 /// A schema migration: version number, human description, and migration function.
 struct Migration {
@@ -34,6 +34,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         description: "Add index_status and index_version columns for extraction tracking",
         up: migrate_v2,
+    },
+    Migration {
+        version: 3,
+        description: "Add change tracking tables and triggers for CRDT sync",
+        up: migrate_v3,
     },
 ];
 
@@ -332,6 +337,113 @@ fn migrate_v2(conn: &Connection) -> Result<()> {
     )?;
     tracing::info!(
         "backfilled index tracking: {backfilled} ok, {failed} failed"
+    );
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Migration v3: Change tracking tables + triggers for CRDT sync
+// ---------------------------------------------------------------------------
+
+fn migrate_v3(conn: &Connection) -> Result<()> {
+    let site_id = uuid::Uuid::now_v7().to_string();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before UNIX epoch")
+        .as_millis() as i64;
+
+    // sync_meta: key-value store for site identity and clock state
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sync_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );",
+    )?;
+
+    conn.execute(
+        "INSERT OR IGNORE INTO sync_meta (key, value) VALUES ('site_id', ?1)",
+        params![&site_id],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO sync_meta (key, value) VALUES ('db_version', '1')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO sync_meta (key, value) VALUES ('hlc_wall_ms', ?1)",
+        params![now_ms.to_string()],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO sync_meta (key, value) VALUES ('hlc_counter', '0')",
+        [],
+    )?;
+
+    // change_log: per-column change records for sync
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS change_log (
+            seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+            tbl         TEXT    NOT NULL,
+            row_id      TEXT    NOT NULL,
+            col         TEXT    NOT NULL,
+            val         BLOB,
+            hlc_ts      INTEGER NOT NULL,
+            hlc_counter INTEGER NOT NULL,
+            site_id     TEXT    NOT NULL,
+            db_version  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_change_log_version ON change_log(db_version);",
+    )?;
+
+    // tombstones: persistent delete markers that survive change_log compaction
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS tombstones (
+            tbl         TEXT NOT NULL,
+            row_id      TEXT NOT NULL,
+            hlc_ts      INTEGER NOT NULL,
+            hlc_counter INTEGER NOT NULL,
+            site_id     TEXT NOT NULL,
+            db_version  INTEGER NOT NULL,
+            PRIMARY KEY (tbl, row_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tombstones_version ON tombstones(db_version);",
+    )?;
+
+    // Install change tracking triggers
+    crate::change_tracking::install_triggers(conn)?;
+
+    // Seed change_log for all existing data so it gets synced on first connect
+    for (tbl, pk_expr) in &[
+        ("entries", "id"),
+        ("entry_content", "entry_id"),
+        ("tags", "id"),
+        ("pdf_pages", "id"),
+    ] {
+        conn.execute(
+            &format!(
+                "INSERT INTO change_log (tbl, row_id, col, val, hlc_ts, hlc_counter, site_id, db_version)
+                 SELECT ?1, {pk_expr}, '__row__', NULL, ?2, 0, ?3, 1
+                 FROM {tbl}"
+            ),
+            params![tbl, now_ms, &site_id],
+        )?;
+    }
+
+    // entry_tags: composite PK
+    conn.execute(
+        "INSERT INTO change_log (tbl, row_id, col, val, hlc_ts, hlc_counter, site_id, db_version)
+         SELECT 'entry_tags', entry_id || '|' || tag_id, '__row__', NULL, ?1, 0, ?2, 1
+         FROM entry_tags",
+        params![now_ms, &site_id],
+    )?;
+
+    let seeded: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM change_log",
+        [],
+        |row| row.get(0),
+    )?;
+    tracing::info!(
+        "change tracking initialized: site_id={}, seeded {seeded} entries",
+        &site_id[..8]
     );
 
     Ok(())
