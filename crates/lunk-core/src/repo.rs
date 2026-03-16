@@ -3,11 +3,13 @@ use rusqlite::{params, Connection};
 use url::Url;
 use uuid::Uuid;
 
+use crate::db::Db;
 use crate::errors::{LunkError, Result};
 use crate::models::*;
 use crate::search::sanitize_fts_query;
 
-pub fn create_entry(conn: &Connection, req: CreateEntryRequest) -> Result<Entry> {
+pub fn create_entry(db: &mut Db, req: CreateEntryRequest) -> Result<Entry> {
+    let conn = db.conn();
     let id = Uuid::now_v7();
     let now = Utc::now();
 
@@ -89,10 +91,11 @@ pub fn create_entry(conn: &Connection, req: CreateEntryRequest) -> Result<Entry>
 }
 
 pub fn create_pdf_entry(
-    conn: &Connection,
+    db: &mut Db,
     req: CreateEntryRequest,
     pages: Vec<(i32, String)>,
 ) -> Result<Entry> {
+    let conn = db.conn();
     let id = Uuid::now_v7();
     let now = Utc::now();
 
@@ -323,11 +326,12 @@ pub fn list_entries(conn: &Connection, params: &ListParams) -> Result<(Vec<Entry
 }
 
 pub fn update_entry(
-    conn: &Connection,
+    db: &mut Db,
     id: &Uuid,
     title: Option<&str>,
     tags: Option<&[String]>,
 ) -> Result<Entry> {
+    let conn = db.conn();
     let now = Utc::now();
 
     if let Some(title) = title {
@@ -351,7 +355,8 @@ pub fn update_entry(
 }
 
 /// Replace all tags on an entry.
-pub fn update_entry_tags(conn: &Connection, id: &Uuid, tags: &[String]) -> Result<Entry> {
+pub fn update_entry_tags(db: &mut Db, id: &Uuid, tags: &[String]) -> Result<Entry> {
+    let conn = db.conn();
     let now = Utc::now();
     set_entry_tags(conn, id, tags)?;
     conn.execute(
@@ -364,12 +369,13 @@ pub fn update_entry_tags(conn: &Connection, id: &Uuid, tags: &[String]) -> Resul
 /// Update the content blobs for an entry (text, snapshot, readable html).
 /// Only non-None fields are updated.
 pub fn update_entry_content(
-    conn: &Connection,
+    db: &mut Db,
     id: &Uuid,
     extracted_text: Option<&str>,
     snapshot_html: Option<&[u8]>,
     readable_html: Option<&[u8]>,
 ) -> Result<()> {
+    let conn = db.conn();
     let now = Utc::now();
     let id_str = id.to_string();
 
@@ -378,7 +384,6 @@ pub fn update_entry_content(
             "UPDATE entry_content SET extracted_text = ?1 WHERE entry_id = ?2",
             params![text, id_str],
         )?;
-        // Update word count on the entry
         let wc = text.split_whitespace().count() as i64;
         conn.execute(
             "UPDATE entries SET word_count = ?1 WHERE id = ?2",
@@ -403,13 +408,13 @@ pub fn update_entry_content(
         params![now.to_rfc3339(), id_str],
     )?;
 
-    // Rebuild FTS for this entry
     crate::search::rebuild_fts_for_entry(conn, id)?;
 
     Ok(())
 }
 
-pub fn delete_entry(conn: &Connection, id: &Uuid) -> Result<()> {
+pub fn delete_entry(db: &mut Db, id: &Uuid) -> Result<()> {
+    let conn = db.conn();
     // entry_content, pdf_pages, entry_tags cleaned up by ON DELETE CASCADE
     let changed = conn.execute(
         "DELETE FROM entries WHERE id = ?1",
@@ -457,7 +462,8 @@ pub fn entry_exists_by_url(conn: &Connection, url: &str) -> Result<Option<Uuid>>
 /// Targets PDFs with no extracted text, failed index status, or old index version.
 /// Updates extracted_text, word_count, page_count, title (if empty), index_status,
 /// index_version, and pdf_pages. Returns the number of entries backfilled.
-pub fn backfill_pdfs(conn: &Connection) -> Result<usize> {
+pub fn backfill_pdfs(db: &mut Db) -> Result<usize> {
+    let conn = db.conn();
     let current_version = crate::pdf::INDEX_VERSION;
 
     // Find PDF entries that need (re)processing
@@ -665,8 +671,8 @@ fn set_entry_tags(conn: &Connection, id: &Uuid, tags: &[String]) -> Result<()> {
 /// Transfer entries from a source database into this connection's database.
 /// Skips entries that already exist (by URL match or ID match).
 /// Returns (transferred, skipped) counts.
-pub fn transfer_entries(conn: &Connection, source_db_path: &str) -> Result<(usize, usize)> {
-    // Attach the source database
+pub fn transfer_entries(db: &mut Db, source_db_path: &str) -> Result<(usize, usize)> {
+    let conn = db.conn();
     conn.execute(
         "ATTACH DATABASE ?1 AS src",
         params![source_db_path],
@@ -674,7 +680,6 @@ pub fn transfer_entries(conn: &Connection, source_db_path: &str) -> Result<(usiz
 
     let result = transfer_entries_inner(conn);
 
-    // Always detach, even on error
     let _ = conn.execute("DETACH DATABASE src", []);
 
     result
@@ -865,10 +870,10 @@ pub fn get_tag_suggestions(conn: &Connection, domain: Option<&str>, title: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db;
+    use crate::db::{self, Db};
 
-    fn test_conn() -> Connection {
-        db::open_in_memory().unwrap()
+    fn test_db() -> Db {
+        db::open_in_memory_db().unwrap()
     }
 
     fn test_req(url: &str, title: &str, text: &str) -> CreateEntryRequest {
@@ -887,7 +892,7 @@ mod tests {
 
     #[test]
     fn test_create_and_get_entry() {
-        let conn = test_conn();
+        let mut db = test_db();
         let mut req = test_req(
             "https://example.com/article",
             "Test Article",
@@ -897,32 +902,32 @@ mod tests {
         req.readable_html = Some(b"<article>clean text</article>".to_vec());
         req.tags = Some(vec!["rust".to_string(), "programming".to_string()]);
 
-        let entry = create_entry(&conn, req).unwrap();
+        let entry = create_entry(&mut db, req).unwrap();
         assert_eq!(entry.title, "Test Article");
         assert_eq!(entry.domain, Some("example.com".to_string()));
         assert_eq!(entry.tags.len(), 2);
 
-        let fetched = get_entry(&conn, &entry.id).unwrap();
+        let fetched = get_entry(db.conn(), &entry.id).unwrap();
         assert_eq!(fetched.title, "Test Article");
         assert_eq!(fetched.tags.len(), 2);
     }
 
     #[test]
     fn test_update_tags() {
-        let conn = test_conn();
-        let entry = create_entry(&conn, test_req("https://example.com", "Test", "text")).unwrap();
+        let mut db = test_db();
+        let entry = create_entry(&mut db, test_req("https://example.com", "Test", "text")).unwrap();
         assert!(entry.tags.is_empty());
 
-        let updated = update_entry_tags(&conn, &entry.id, &["rust".to_string(), "web".to_string()]).unwrap();
+        let updated = update_entry_tags(&mut db, &entry.id, &["rust".to_string(), "web".to_string()]).unwrap();
         assert_eq!(updated.tags.len(), 2);
 
-        let updated = update_entry_tags(&conn, &entry.id, &["rust".to_string()]).unwrap();
+        let updated = update_entry_tags(&mut db, &entry.id, &["rust".to_string()]).unwrap();
         assert_eq!(updated.tags, vec!["rust"]);
     }
 
     #[test]
     fn test_list_entries() {
-        let conn = test_conn();
+        let mut db = test_db();
 
         for i in 0..5 {
             let mut req = test_req(
@@ -933,14 +938,14 @@ mod tests {
             if i < 3 {
                 req.tags = Some(vec!["batch-a".to_string()]);
             }
-            create_entry(&conn, req).unwrap();
+            create_entry(&mut db, req).unwrap();
         }
 
-        let (all, total) = list_entries(&conn, &ListParams::default()).unwrap();
+        let (all, total) = list_entries(db.conn(), &ListParams::default()).unwrap();
         assert_eq!(total, 5);
         assert_eq!(all.len(), 5);
 
-        let (tagged, total) = list_entries(&conn, &ListParams {
+        let (tagged, total) = list_entries(db.conn(), &ListParams {
             tag: Some("batch-a".to_string()),
             ..Default::default()
         }).unwrap();
@@ -950,27 +955,26 @@ mod tests {
 
     #[test]
     fn test_delete_entry() {
-        let conn = test_conn();
-        let entry = create_entry(&conn, test_req("https://example.com", "To Delete", "text")).unwrap();
-        delete_entry(&conn, &entry.id).unwrap();
-        assert!(get_entry(&conn, &entry.id).is_err());
+        let mut db = test_db();
+        let entry = create_entry(&mut db, test_req("https://example.com", "To Delete", "text")).unwrap();
+        delete_entry(&mut db, &entry.id).unwrap();
+        assert!(get_entry(db.conn(), &entry.id).is_err());
     }
 
     #[test]
     fn test_entry_exists_by_url() {
-        let conn = test_conn();
-        assert!(entry_exists_by_url(&conn, "https://example.com").unwrap().is_none());
+        let mut db = test_db();
+        assert!(entry_exists_by_url(db.conn(), "https://example.com").unwrap().is_none());
 
-        let entry = create_entry(&conn, test_req("https://example.com", "Test", "text")).unwrap();
-        let found = entry_exists_by_url(&conn, "https://example.com").unwrap();
+        let entry = create_entry(&mut db, test_req("https://example.com", "Test", "text")).unwrap();
+        let found = entry_exists_by_url(db.conn(), "https://example.com").unwrap();
         assert_eq!(found, Some(entry.id));
     }
 
     #[test]
     fn test_tag_suggestions_by_domain() {
-        let conn = test_conn();
+        let mut db = test_db();
 
-        // Create entries on arxiv.org with "research" tag
         for i in 0..3 {
             let mut req = test_req(
                 &format!("https://arxiv.org/paper/{i}"),
@@ -978,22 +982,20 @@ mod tests {
                 &format!("research content {i}"),
             );
             req.tags = Some(vec!["research".to_string()]);
-            create_entry(&conn, req).unwrap();
+            create_entry(&mut db, req).unwrap();
         }
 
-        let suggestions = suggest_tags_by_domain(&conn, "arxiv.org", 5).unwrap();
+        let suggestions = suggest_tags_by_domain(db.conn(), "arxiv.org", 5).unwrap();
         assert_eq!(suggestions, vec!["research"]);
 
-        // Different domain should yield nothing
-        let suggestions = suggest_tags_by_domain(&conn, "example.com", 5).unwrap();
+        let suggestions = suggest_tags_by_domain(db.conn(), "example.com", 5).unwrap();
         assert!(suggestions.is_empty());
     }
 
     #[test]
     fn test_tag_suggestions_popular() {
-        let conn = test_conn();
+        let mut db = test_db();
 
-        // Create entries with varying tag usage
         for i in 0..5 {
             let mut req = test_req(
                 &format!("https://example.com/{i}"),
@@ -1001,13 +1003,13 @@ mod tests {
                 &format!("content {i}"),
             );
             req.tags = Some(vec!["common".to_string()]);
-            create_entry(&conn, req).unwrap();
+            create_entry(&mut db, req).unwrap();
         }
         let mut req = test_req("https://example.com/rare", "Rare", "rare content");
         req.tags = Some(vec!["rare".to_string()]);
-        create_entry(&conn, req).unwrap();
+        create_entry(&mut db, req).unwrap();
 
-        let popular = suggest_tags_popular(&conn, 5).unwrap();
+        let popular = suggest_tags_popular(db.conn(), 5).unwrap();
         assert_eq!(popular[0], "common");
     }
 }

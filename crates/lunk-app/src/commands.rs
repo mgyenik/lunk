@@ -1,7 +1,7 @@
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
-use lunk_core::db::{with_db, DbPool};
+use lunk_core::db::{with_db, with_db_mut, DbPool};
 use lunk_core::models::*;
 use lunk_core::{repo, search, sync};
 
@@ -129,7 +129,7 @@ pub fn update_entry_tags(
     tags: Vec<String>,
 ) -> Result<Entry, String> {
     let uuid = uuid::Uuid::parse_str(&id).map_err(|e| format!("invalid id: {e}"))?;
-    with_db(&db, |conn| repo::update_entry_tags(conn, &uuid, &tags))
+    with_db_mut(&db, |db| repo::update_entry_tags(db, &uuid, &tags))
         .map_err(|e| e.to_string())
 }
 
@@ -150,7 +150,7 @@ pub fn delete_entry(
     id: String,
 ) -> Result<(), String> {
     let uuid = uuid::Uuid::parse_str(&id).map_err(|e| format!("invalid id: {e}"))?;
-    with_db(&db, |conn| repo::delete_entry(conn, &uuid)).map_err(|e| e.to_string())
+    with_db_mut(&db, |db| repo::delete_entry(db, &uuid)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -194,7 +194,7 @@ pub fn import_pdf(
         source: SaveSource::Api,
     };
 
-    with_db(&db, |conn| repo::create_pdf_entry(conn, req, pages))
+    with_db_mut(&db, |db| repo::create_pdf_entry(db, req, pages))
         .map_err(|e| e.to_string())
 }
 

@@ -4,7 +4,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 
 use lunk_core::config::Config;
-use lunk_core::db;
+use lunk_core::db::{self, Db};
 use lunk_core::models::*;
 use lunk_core::repo;
 
@@ -29,7 +29,7 @@ struct NativeResponse {
 
 pub async fn run() -> lunk_core::errors::Result<()> {
     let db_path = Config::db_path()?;
-    let conn = db::open_database(&db_path)?;
+    let mut db = db::open_db(&db_path)?;
 
     loop {
         // Read message length (4 bytes, little-endian)
@@ -55,7 +55,7 @@ pub async fn run() -> lunk_core::errors::Result<()> {
         let request_id = msg.request_id.clone();
 
         // Process message
-        let mut response = handle_message(&conn, msg);
+        let mut response = handle_message(&mut db, msg);
         response.request_id = request_id;
 
         // Write response
@@ -69,7 +69,7 @@ pub async fn run() -> lunk_core::errors::Result<()> {
     Ok(())
 }
 
-fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResponse {
+fn handle_message(db: &mut Db, msg: NativeMessage) -> NativeResponse {
     match msg.action.as_str() {
         "ping" => NativeResponse {
             success: true,
@@ -88,7 +88,7 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
                 };
             };
 
-            match handle_save_entry(conn, data) {
+            match handle_save_entry(db, data) {
                 Ok(entry) => NativeResponse {
                     success: true,
                     data: Some(serde_json::to_value(entry).unwrap()),
@@ -110,6 +110,7 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
                 .and_then(|d| d.get("url"))
                 .and_then(|v| v.as_str());
 
+            let conn = db.conn();
             match url {
                 Some(url) => match repo::entry_exists_by_url(conn, url) {
                     Ok(Some(id)) => {
@@ -180,7 +181,7 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
                         }
                     };
 
-                    match repo::update_entry_tags(conn, &uuid, &tags) {
+                    match repo::update_entry_tags(db, &uuid, &tags) {
                         Ok(entry) => NativeResponse {
                             success: true,
                             data: Some(serde_json::to_value(entry).unwrap()),
@@ -241,7 +242,7 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
                         .and_then(|s| engine.decode(s).ok());
 
                     match repo::update_entry_content(
-                        conn,
+                        db,
                         &uuid,
                         extracted_text,
                         Some(&snapshot),
@@ -268,6 +269,7 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
         }
 
         "get_tag_suggestions" => {
+            let conn = db.conn();
             let domain = msg
                 .data
                 .as_ref()
@@ -304,7 +306,7 @@ fn handle_message(conn: &rusqlite::Connection, msg: NativeMessage) -> NativeResp
 }
 
 fn handle_save_entry(
-    conn: &rusqlite::Connection,
+    db: &mut Db,
     data: serde_json::Value,
 ) -> lunk_core::errors::Result<Entry> {
     use base64::Engine;
@@ -351,9 +353,9 @@ fn handle_save_entry(
 
     // Check for duplicate URL
     if let Some(ref url) = url
-        && let Some(existing_id) = repo::entry_exists_by_url(conn, url)?
+        && let Some(existing_id) = repo::entry_exists_by_url(db.conn(), url)?
     {
-        return repo::get_entry(conn, &existing_id);
+        return repo::get_entry(db.conn(), &existing_id);
     }
 
     // For PDFs, try to extract a better title from PDF metadata if the
@@ -380,6 +382,6 @@ fn handle_save_entry(
         source: SaveSource::Extension,
     };
 
-    repo::create_entry(conn, req)
+    repo::create_entry(db, req)
 }
 

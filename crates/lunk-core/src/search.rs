@@ -241,15 +241,15 @@ mod tests {
     use crate::db;
     use crate::repo;
 
-    fn test_conn() -> Connection {
-        db::open_in_memory().unwrap()
+    fn test_db() -> db::Db {
+        db::open_in_memory_db().unwrap()
     }
 
     #[test]
     fn test_search_articles() {
-        let conn = test_conn();
+        let mut db = test_db();
 
-        repo::create_entry(&conn, CreateEntryRequest {
+        repo::create_entry(&mut db, CreateEntryRequest {
             url: Some("https://example.com/rust".to_string()),
             title: "Learning Rust".to_string(),
             content_type: ContentType::Article,
@@ -261,7 +261,7 @@ mod tests {
             source: SaveSource::Cli,
         }).unwrap();
 
-        repo::create_entry(&conn, CreateEntryRequest {
+        repo::create_entry(&mut db, CreateEntryRequest {
             url: Some("https://example.com/go".to_string()),
             title: "Learning Go".to_string(),
             content_type: ContentType::Article,
@@ -273,19 +273,21 @@ mod tests {
             source: SaveSource::Cli,
         }).unwrap();
 
-        let results = search(&conn, "rust", 10, 0).unwrap();
+        let conn = db.conn();
+        let results = search(conn, "rust", 10, 0).unwrap();
         assert_eq!(results.total, 1);
         assert_eq!(results.entries[0].entry.title, "Learning Rust");
 
-        let results = search(&conn, "programming", 10, 0).unwrap();
+        let results = search(conn, "programming", 10, 0).unwrap();
         assert_eq!(results.total, 2);
     }
 
     #[test]
     fn test_search_empty_query() {
-        let conn = test_conn();
-        assert!(search(&conn, "", 10, 0).is_err());
-        assert!(search(&conn, "   ", 10, 0).is_err());
+        let db = test_db();
+        let conn = db.conn();
+        assert!(search(conn, "", 10, 0).is_err());
+        assert!(search(conn, "   ", 10, 0).is_err());
     }
 
     #[test]

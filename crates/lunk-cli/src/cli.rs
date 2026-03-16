@@ -10,9 +10,14 @@ use lunk_core::search;
 use lunk_core::sync;
 use lunk_core::transport::SyncNode;
 
-fn open_db() -> Result<rusqlite::Connection> {
+fn open_conn() -> Result<rusqlite::Connection> {
     let db_path = Config::db_path()?;
     db::open_database(&db_path)
+}
+
+fn open_db_wrapped() -> Result<db::Db> {
+    let db_path = Config::db_path()?;
+    db::open_db(&db_path)
 }
 
 pub async fn save_url(url: &str, tags: &[String]) -> Result<()> {
@@ -49,10 +54,10 @@ pub async fn save_url(url: &str, tags: &[String]) -> Result<()> {
         return Err(LunkError::Other("could not extract any text from the page".to_string()));
     }
 
-    let conn = open_db()?;
+    let mut db = open_db_wrapped()?;
 
     // Check for duplicates
-    if let Some(existing_id) = repo::entry_exists_by_url(&conn, url)? {
+    if let Some(existing_id) = repo::entry_exists_by_url(db.conn(), url)? {
         println!("URL already saved as entry {existing_id}");
         return Ok(());
     }
@@ -77,7 +82,7 @@ pub async fn save_url(url: &str, tags: &[String]) -> Result<()> {
         source: SaveSource::Cli,
     };
 
-    let entry = repo::create_entry(&conn, req)?;
+    let entry = repo::create_entry(&mut db, req)?;
     println!("Saved: {} [{}]", entry.title, entry.id);
     if let Some(wc) = entry.word_count {
         println!("  {} words | {}", wc, entry.domain.as_deref().unwrap_or("unknown"));
@@ -114,7 +119,7 @@ pub async fn import_pdf(path: &str, title: Option<&str>, tags: &[String]) -> Res
                 .to_string()
         });
 
-    let conn = open_db()?;
+    let mut db = open_db_wrapped()?;
 
     let req = CreateEntryRequest {
         url: None,
@@ -128,7 +133,7 @@ pub async fn import_pdf(path: &str, title: Option<&str>, tags: &[String]) -> Res
         source: SaveSource::Cli,
     };
 
-    let entry = repo::create_pdf_entry(&conn, req, pages)?;
+    let entry = repo::create_pdf_entry(&mut db, req, pages)?;
     println!("Imported: {} [{}]", entry.title, entry.id);
     if let Some(pc) = entry.page_count {
         println!("  {} pages | {} words", pc, entry.word_count.unwrap_or(0));
@@ -138,7 +143,7 @@ pub async fn import_pdf(path: &str, title: Option<&str>, tags: &[String]) -> Res
 }
 
 pub async fn search(query: &str, limit: i64, _content_type: Option<&str>, json: bool) -> Result<()> {
-    let conn = open_db()?;
+    let conn = open_conn()?;
     let results = search::search(&conn, query, limit, 0)?;
 
     if json {
@@ -191,7 +196,7 @@ pub async fn list_entries(
     limit: i64,
     json: bool,
 ) -> Result<()> {
-    let conn = open_db()?;
+    let conn = open_conn()?;
 
     let params = ListParams {
         content_type: content_type.and_then(ContentType::parse),
@@ -249,11 +254,11 @@ pub async fn list_entries(
 }
 
 pub fn tag_entry(id: &str, tags: &[String], remove: bool) -> Result<()> {
-    let conn = open_db()?;
+    let mut db = open_db_wrapped()?;
     let uuid = uuid::Uuid::parse_str(id)
         .map_err(|e| LunkError::InvalidInput(format!("invalid id: {e}")))?;
 
-    let entry = repo::get_entry(&conn, &uuid)?;
+    let entry = repo::get_entry(db.conn(), &uuid)?;
     let mut current_tags = entry.tags;
 
     if remove {
@@ -266,7 +271,7 @@ pub fn tag_entry(id: &str, tags: &[String], remove: bool) -> Result<()> {
         }
     }
 
-    let entry = repo::update_entry_tags(&conn, &uuid, &current_tags)?;
+    let entry = repo::update_entry_tags(&mut db, &uuid, &current_tags)?;
     let short = &id[..8.min(id.len())];
     if entry.tags.is_empty() {
         println!("Entry {short}: no tags");
@@ -277,11 +282,11 @@ pub fn tag_entry(id: &str, tags: &[String], remove: bool) -> Result<()> {
 }
 
 pub async fn delete_entry(id: &str) -> Result<()> {
-    let conn = open_db()?;
+    let mut db = open_db_wrapped()?;
     let uuid = uuid::Uuid::parse_str(id)
         .map_err(|e| LunkError::InvalidInput(format!("invalid id: {e}")))?;
 
-    repo::delete_entry(&conn, &uuid)?;
+    repo::delete_entry(&mut db, &uuid)?;
     println!("Deleted entry {}", &id[..8.min(id.len())]);
     Ok(())
 }
@@ -292,8 +297,8 @@ pub async fn serve(port: u16) -> Result<()> {
     eprintln!("profile: {profile}");
     eprintln!("database: {}", db_path.display());
 
-    let conn = db::open_database(&db_path)?;
-    let pool = db::create_pool(conn);
+    let wrapped_db = db::open_db(&db_path)?;
+    let pool = db::create_pool(wrapped_db);
 
     let state = lunk_server::state::AppState { db: pool, sync_node: None };
     let router = lunk_server::build_router(state);
@@ -346,7 +351,7 @@ pub fn install_native_messaging(extension_id: &str, browser: &str) -> Result<()>
 }
 
 pub fn export(output: Option<&str>, with_content: bool) -> Result<()> {
-    let conn = open_db()?;
+    let conn = open_conn()?;
 
     let params = ListParams {
         limit: Some(10_000),
@@ -399,8 +404,8 @@ pub fn backfill_pdfs() -> Result<()> {
     eprintln!("profile: {profile}");
     eprintln!("database: {}", db_path.display());
 
-    let conn = open_db()?;
-    let count = repo::backfill_pdfs(&conn)?;
+    let mut db = open_db_wrapped()?;
+    let count = repo::backfill_pdfs(&mut db)?;
     if count == 0 {
         println!("No PDFs need backfilling (all already have extracted text)");
     } else {
@@ -415,7 +420,7 @@ pub fn rebuild_fts() -> Result<()> {
     eprintln!("profile: {profile}");
     eprintln!("database: {}", db_path.display());
 
-    let conn = open_db()?;
+    let conn = open_conn()?;
     let count = schema::rebuild_fts(&conn)?;
     println!("Rebuilt FTS index: {count} entries indexed");
     Ok(())
@@ -444,8 +449,8 @@ pub fn transfer(from: &str) -> Result<()> {
     eprintln!("destination: {} ({})", dest_profile, dest_path.display());
     eprintln!();
 
-    let conn = open_db()?;
-    let (transferred, skipped) = repo::transfer_entries(&conn, source_path.to_str().unwrap())?;
+    let mut db = open_db_wrapped()?;
+    let (transferred, skipped) = repo::transfer_entries(&mut db, source_path.to_str().unwrap())?;
 
     println!("Transferred {transferred} entries, skipped {skipped} duplicates");
     Ok(())
@@ -469,7 +474,7 @@ pub fn migrate_status() -> Result<()> {
     println!("database: {}", db_path.display());
     println!();
 
-    let conn = open_db()?;
+    let conn = open_conn()?;
     let current = schema::current_version(&conn)?;
     let target = schema::SCHEMA_VERSION;
 
@@ -575,7 +580,7 @@ pub async fn sync_trigger() -> Result<()> {
     }
     db::register_crrs(&conn)?;
 
-    let pool = db::create_pool(conn);
+    let pool = db::create_pool(db::Db::new(conn));
     let data_dir = Config::data_dir()?;
 
     let node = SyncNode::new(&data_dir, pool).await?;
@@ -640,7 +645,7 @@ pub fn sync_status() -> Result<()> {
 }
 
 pub fn sync_add_peer(id: &str, name: Option<&str>) -> Result<()> {
-    let conn = open_db()?;
+    let conn = open_conn()?;
     sync::add_sync_peer(&conn, id, name)?;
 
     let short = &id[..16.min(id.len())];
@@ -652,7 +657,7 @@ pub fn sync_add_peer(id: &str, name: Option<&str>) -> Result<()> {
 }
 
 pub fn sync_remove_peer(id: &str) -> Result<()> {
-    let conn = open_db()?;
+    let conn = open_conn()?;
     sync::remove_sync_peer(&conn, id)?;
 
     let short = &id[..16.min(id.len())];
@@ -661,7 +666,7 @@ pub fn sync_remove_peer(id: &str) -> Result<()> {
 }
 
 pub fn sync_list_peers() -> Result<()> {
-    let conn = open_db()?;
+    let conn = open_conn()?;
     let peers = sync::get_sync_peers(&conn)?;
 
     if peers.is_empty() {

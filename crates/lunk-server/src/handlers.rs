@@ -5,7 +5,7 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use lunk_core::db::with_db;
+use lunk_core::db::{with_db, with_db_mut};
 use lunk_core::models::*;
 use lunk_core::{repo, search};
 
@@ -213,7 +213,7 @@ async fn create_entry(
             req.extracted_text = full_text;
         }
 
-        let entry = with_db(&state.db, |conn| repo::create_pdf_entry(conn, req, pages))?;
+        let entry = with_db_mut(&state.db, |db| repo::create_pdf_entry(db, req, pages))?;
         return Ok((StatusCode::CREATED, Json(entry)));
     }
 
@@ -226,7 +226,7 @@ async fn create_entry(
         }
     }
 
-    let entry = with_db(&state.db, |conn| repo::create_entry(conn, req))?;
+    let entry = with_db_mut(&state.db, |db| repo::create_entry(db, req))?;
     Ok((StatusCode::CREATED, Json(entry)))
 }
 
@@ -275,8 +275,8 @@ async fn update_entry(
     let uuid = uuid::Uuid::parse_str(&id)
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
 
-    let entry = with_db(&state.db, |conn| {
-        repo::update_entry(conn, &uuid, body.title.as_deref(), body.tags.as_deref())
+    let entry = with_db_mut(&state.db, |db| {
+        repo::update_entry(db, &uuid, body.title.as_deref(), body.tags.as_deref())
     })?;
 
     Ok(Json(entry))
@@ -290,8 +290,8 @@ async fn update_entry_tags(
     let uuid = uuid::Uuid::parse_str(&id)
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
 
-    let entry = with_db(&state.db, |conn| {
-        repo::update_entry_tags(conn, &uuid, &body.tags)
+    let entry = with_db_mut(&state.db, |db| {
+        repo::update_entry_tags(db, &uuid, &body.tags)
     })?;
 
     Ok(Json(entry))
@@ -319,9 +319,9 @@ async fn update_entry_snapshot(
         .transpose()
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid readable_html base64: {e}")))?;
 
-    with_db(&state.db, |conn| {
+    with_db_mut(&state.db, |db| {
         repo::update_entry_content(
-            conn,
+            db,
             &uuid,
             extracted_text,
             Some(&snapshot),
@@ -338,7 +338,7 @@ async fn delete_entry(
 ) -> ApiResult<StatusCode> {
     let uuid = uuid::Uuid::parse_str(&id)
         .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
-    with_db(&state.db, |conn| repo::delete_entry(conn, &uuid))?;
+    with_db_mut(&state.db, |db| repo::delete_entry(db, &uuid))?;
     Ok(StatusCode::NO_CONTENT)
 }
 

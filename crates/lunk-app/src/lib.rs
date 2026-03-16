@@ -30,15 +30,15 @@ pub fn run() {
     tracing::info!("profile: {profile}");
     tracing::info!("database: {}", db_path.display());
 
-    let conn = db::open_database(&db_path).expect("failed to open database");
+    let wrapped_db = db::open_db(&db_path).expect("failed to open database");
 
-    // Load cr-sqlite extension for CRDT sync
-    let crsqlite_loaded = db::try_load_crsqlite(&conn, config.sync.crsqlite_ext_path.as_deref());
+    // Load cr-sqlite extension for CRDT sync (legacy, to be removed)
+    let crsqlite_loaded = db::try_load_crsqlite(wrapped_db.conn(), config.sync.crsqlite_ext_path.as_deref());
     if crsqlite_loaded {
-        db::register_crrs(&conn).expect("failed to register CRR tables");
+        db::register_crrs(wrapped_db.conn()).expect("failed to register CRR tables");
     }
 
-    let pool = db::create_pool(conn);
+    let pool = db::create_pool(wrapped_db);
 
     let server_pool = pool.clone();
     let sync_pool = pool.clone();
