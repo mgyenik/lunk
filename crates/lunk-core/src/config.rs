@@ -40,7 +40,6 @@ pub struct ServerConfig {
 pub struct SyncConfig {
     pub enabled: bool,
     pub interval_secs: u64,
-    pub crsqlite_ext_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,7 +59,6 @@ impl Config {
                 sync: SyncConfig {
                     enabled: true,
                     interval_secs: 300,
-                    crsqlite_ext_path: None,
                 },
                 logging: LoggingConfig {
                     level: "debug".to_string(),
@@ -74,7 +72,6 @@ impl Config {
                 sync: SyncConfig {
                     enabled: true,
                     interval_secs: 300,
-                    crsqlite_ext_path: None,
                 },
                 logging: LoggingConfig {
                     level: "info".to_string(),

@@ -554,33 +554,10 @@ fn dirs_next() -> std::path::PathBuf {
 
 // --- Sync commands ---
 
-fn open_db_with_crsqlite() -> Result<rusqlite::Connection> {
-    let config = Config::load()?;
-    let db_path = Config::db_path()?;
-    let conn = db::open_database(&db_path)?;
-
-    let loaded = db::try_load_crsqlite(&conn, config.sync.crsqlite_ext_path.as_deref());
-    if loaded {
-        db::register_crrs(&conn)?;
-    }
-
-    Ok(conn)
-}
-
 pub async fn sync_trigger() -> Result<()> {
-    let config = Config::load()?;
     let db_path = Config::db_path()?;
-    let conn = db::open_database(&db_path)?;
-
-    let loaded = db::try_load_crsqlite(&conn, config.sync.crsqlite_ext_path.as_deref());
-    if !loaded {
-        return Err(LunkError::Config(
-            "cr-sqlite extension not found; sync requires cr-sqlite".into(),
-        ));
-    }
-    db::register_crrs(&conn)?;
-
-    let pool = db::create_pool(db::Db::new(conn));
+    let wrapped_db = db::open_db(&db_path)?;
+    let pool = db::create_pool(wrapped_db);
     let data_dir = Config::data_dir()?;
 
     let node = SyncNode::new(&data_dir, pool).await?;
@@ -611,18 +588,12 @@ pub async fn sync_trigger() -> Result<()> {
 }
 
 pub fn sync_status() -> Result<()> {
-    let conn = open_db_with_crsqlite()?;
+    let conn = open_conn()?;
 
-    let crsqlite_available = db::is_crsqlite_loaded(&conn);
-    println!("cr-sqlite: {}", if crsqlite_available { "loaded" } else { "not available" });
-
-    if crsqlite_available {
-        let db_version = sync::get_db_version(&conn)?;
-        let site_id = sync::get_site_id(&conn)?;
-        println!("Site ID: {site_id}");
-        println!("DB version: {db_version}");
-    }
-
+    let db_version = sync::get_db_version(&conn)?;
+    let site_id = sync::get_site_id(&conn)?;
+    println!("Site ID: {site_id}");
+    println!("DB version: {db_version}");
     println!();
 
     let peers = sync::get_sync_peers(&conn)?;

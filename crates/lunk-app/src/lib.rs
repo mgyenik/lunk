@@ -31,18 +31,11 @@ pub fn run() {
     tracing::info!("database: {}", db_path.display());
 
     let wrapped_db = db::open_db(&db_path).expect("failed to open database");
-
-    // Load cr-sqlite extension for CRDT sync (legacy, to be removed)
-    let crsqlite_loaded = db::try_load_crsqlite(wrapped_db.conn(), config.sync.crsqlite_ext_path.as_deref());
-    if crsqlite_loaded {
-        db::register_crrs(wrapped_db.conn()).expect("failed to register CRR tables");
-    }
-
     let pool = db::create_pool(wrapped_db);
 
     let server_pool = pool.clone();
     let sync_pool = pool.clone();
-    let sync_enabled = crsqlite_loaded && config.sync.enabled;
+    let sync_enabled = config.sync.enabled;
     let sync_interval = config.sync.interval_secs;
     let server_bind = format!("{}:{}", config.server.bind, config.server.port);
 
@@ -128,9 +121,6 @@ pub fn run() {
                         }
                     }
                 } else {
-                    if !crsqlite_loaded {
-                        tracing::info!("cr-sqlite not loaded; P2P sync disabled");
-                    }
                     None
                 };
 

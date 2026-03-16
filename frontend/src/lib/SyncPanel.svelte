@@ -106,7 +106,7 @@
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Share this ID with peers to connect</p>
       {:else}
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          cr-sqlite extension not found. Install cr-sqlite to enable P2P sync.
+          Sync node is starting...
         </p>
       {/if}
     </div>
