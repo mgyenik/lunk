@@ -448,3 +448,159 @@ fn migrate_v3(conn: &Connection) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fresh_migration_creates_all_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        for expected in &[
+            "entries",
+            "entry_content",
+            "entry_tags",
+            "tags",
+            "pdf_pages",
+            "sync_meta",
+            "change_log",
+            "tombstones",
+            "sync_peers",
+            "schema_version",
+        ] {
+            assert!(
+                tables.iter().any(|t| t == expected),
+                "missing table: {expected}"
+            );
+        }
+
+        assert_eq!(current_version(&conn).unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_migration_v3_seeds_existing_data() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER NOT NULL,
+                description TEXT,
+                applied_at TEXT
+            );",
+        )
+        .unwrap();
+
+        // Run v1 + v2 manually
+        migrate_v1(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO schema_version (version, description, applied_at) VALUES (1, 'v1', datetime('now'))",
+            [],
+        )
+        .unwrap();
+
+        migrate_v2(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO schema_version (version, description, applied_at) VALUES (2, 'v2', datetime('now'))",
+            [],
+        )
+        .unwrap();
+
+        // Insert test data at v2
+        let now = chrono::Utc::now().to_rfc3339();
+        let id = uuid::Uuid::now_v7().to_string();
+        conn.execute(
+            "INSERT INTO entries (id, title, content_type, status, index_status, index_version, created_at, updated_at, saved_by)
+             VALUES (?1, 'Test', 'article', 'unread', 'ok', 1, ?2, ?2, 'cli')",
+            params![&id, &now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO entry_content (entry_id, extracted_text) VALUES (?1, 'hello world')",
+            params![&id],
+        )
+        .unwrap();
+
+        // Run all migrations (should apply v3)
+        run_migrations(&conn).unwrap();
+
+        // Site ID should be set
+        let site_id: String = conn
+            .query_row(
+                "SELECT value FROM sync_meta WHERE key = 'site_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!site_id.is_empty());
+
+        // Change log seeded for existing data
+        let change_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM change_log", [], |row| row.get(0))
+            .unwrap();
+        assert!(
+            change_count >= 2,
+            "change_log should be seeded, got {change_count}"
+        );
+
+        // Original data intact
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM entries WHERE id = ?1",
+                params![&id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Test");
+        assert_eq!(current_version(&conn).unwrap(), 3);
+    }
+
+    #[test]
+    fn test_migrations_are_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        assert_eq!(current_version(&conn).unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_rebuild_fts() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let id = uuid::Uuid::now_v7().to_string();
+        conn.execute(
+            "INSERT INTO entries (id, title, content_type, status, index_status, index_version, created_at, updated_at, saved_by)
+             VALUES (?1, 'FTS Test', 'article', 'unread', 'ok', 1, ?2, ?2, 'cli')",
+            params![&id, &now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO entry_content (entry_id, extracted_text) VALUES (?1, 'searchable text here')",
+            params![&id],
+        )
+        .unwrap();
+
+        let count = rebuild_fts(&conn).unwrap();
+        assert_eq!(count, 1);
+
+        let found: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM entries_fts WHERE entries_fts MATCH 'searchable'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(found, "FTS should find the rebuilt entry");
+    }
+}

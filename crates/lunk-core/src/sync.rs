@@ -296,8 +296,13 @@ pub fn apply_changesets(
             .push(cs);
     }
 
+    // Sort groups by table dependency order (parents before children)
+    let mut sorted_keys: Vec<_> = groups.keys().cloned().collect();
+    sorted_keys.sort_by_key(|(tbl, _)| table_insert_order(tbl));
+
     // Apply column changes
-    for ((tbl, row_id), cols) in &groups {
+    for (tbl, row_id) in &sorted_keys {
+        let cols = &groups[&(tbl.clone(), row_id.clone())];
         let exists = row_exists(conn, tbl, row_id)?;
 
         if !exists {
@@ -381,6 +386,18 @@ pub fn rebuild_fts_after_sync(conn: &Connection, changesets: &[ChangesetRow]) ->
 
 // --- Internal helpers for apply ---
 
+/// Insertion order for FK dependencies: parent tables first.
+fn table_insert_order(tbl: &str) -> u8 {
+    match tbl {
+        "entries" => 0,
+        "tags" => 0,
+        "entry_content" => 1,
+        "entry_tags" => 1,
+        "pdf_pages" => 1,
+        _ => 2,
+    }
+}
+
 fn row_exists(conn: &Connection, tbl: &str, row_id: &str) -> Result<bool> {
     let result = match tbl {
         "entry_tags" => {
@@ -446,9 +463,10 @@ fn should_apply_column(
     col: &str,
     incoming: &HlcTimestamp,
 ) -> Result<bool> {
+    // Check for the specific column OR a __row__ entry (which covers all columns)
     let result = conn.query_row(
         "SELECT hlc_ts, hlc_counter, site_id FROM change_log
-         WHERE tbl = ?1 AND row_id = ?2 AND col = ?3
+         WHERE tbl = ?1 AND row_id = ?2 AND (col = ?3 OR col = '__row__')
          ORDER BY hlc_ts DESC, hlc_counter DESC, site_id DESC
          LIMIT 1",
         params![tbl, row_id, col],
@@ -678,4 +696,533 @@ pub async fn read_message(recv: &mut iroh::endpoint::RecvStream) -> Result<SyncM
         .map_err(|e| LunkError::Transport(format!("read body: {e}")))?;
 
     serde_json::from_slice(&buf).map_err(|e| LunkError::Sync(format!("invalid message: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use crate::models::*;
+    use crate::repo;
+
+    fn test_db() -> Db {
+        db::open_in_memory_db().expect("open in-memory db")
+    }
+
+    fn create_test_entry(db: &mut Db, title: &str) -> uuid::Uuid {
+        let req = CreateEntryRequest {
+            url: Some(format!("https://example.com/{}", title.replace(' ', "-"))),
+            title: title.to_string(),
+            content_type: ContentType::Article,
+            extracted_text: format!("text content for {title}"),
+            snapshot_html: None,
+            readable_html: None,
+            pdf_data: None,
+            tags: None,
+            source: SaveSource::Cli,
+        };
+        let entry = repo::create_entry(db, req).unwrap();
+        entry.id
+    }
+
+    #[test]
+    fn test_get_changesets_since() {
+        let mut db = test_db();
+        let initial_ver = db.db_version();
+
+        let _id1 = create_test_entry(&mut db, "First");
+        let _id2 = create_test_entry(&mut db, "Second");
+
+        // All changes should be visible from version 0
+        let (all_cs, all_ts) = get_changesets_since(db.conn(), 0).unwrap();
+        assert!(!all_cs.is_empty(), "should have changesets");
+        assert!(all_ts.is_empty(), "no tombstones yet");
+
+        // Entries table should be present
+        assert!(all_cs.iter().any(|c| c.tbl == "entries"), "should have entries changesets");
+        assert!(
+            all_cs.iter().any(|c| c.tbl == "entry_content"),
+            "should have entry_content changesets"
+        );
+
+        // Changes after initial version should also be present
+        let (recent_cs, _) = get_changesets_since(db.conn(), initial_ver).unwrap();
+        assert!(!recent_cs.is_empty());
+
+        // Changes after current version should be empty
+        let current = db.db_version();
+        let (future_cs, future_ts) = get_changesets_since(db.conn(), current).unwrap();
+        assert!(future_cs.is_empty(), "no changes after current version");
+        assert!(future_ts.is_empty(), "no tombstones after current version");
+    }
+
+    #[test]
+    fn test_get_site_id_and_db_version() {
+        let db = test_db();
+        let site_id = get_site_id(db.conn()).unwrap();
+        assert!(!site_id.is_empty(), "site_id should be set");
+
+        let ver = get_db_version(db.conn()).unwrap();
+        assert!(ver >= 1, "db_version should be >= 1 after migration");
+    }
+
+    #[test]
+    fn test_apply_changesets_new_row() {
+        let mut db = test_db();
+
+        // Create changesets that represent a new entry
+        let entry_id = uuid::Uuid::now_v7().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let changesets = vec![
+            ChangesetRow {
+                tbl: "entries".into(),
+                row_id: entry_id.clone(),
+                col: "id".into(),
+                val: SqlValue::Text(entry_id.clone()),
+                hlc_ts: 1000,
+                hlc_counter: 0,
+                site_id: "remote-site".into(),
+                db_version: 1,
+            },
+            ChangesetRow {
+                tbl: "entries".into(),
+                row_id: entry_id.clone(),
+                col: "title".into(),
+                val: SqlValue::Text("Remote Entry".into()),
+                hlc_ts: 1000,
+                hlc_counter: 0,
+                site_id: "remote-site".into(),
+                db_version: 1,
+            },
+            ChangesetRow {
+                tbl: "entries".into(),
+                row_id: entry_id.clone(),
+                col: "content_type".into(),
+                val: SqlValue::Text("article".into()),
+                hlc_ts: 1000,
+                hlc_counter: 0,
+                site_id: "remote-site".into(),
+                db_version: 1,
+            },
+            ChangesetRow {
+                tbl: "entries".into(),
+                row_id: entry_id.clone(),
+                col: "status".into(),
+                val: SqlValue::Text("unread".into()),
+                hlc_ts: 1000,
+                hlc_counter: 0,
+                site_id: "remote-site".into(),
+                db_version: 1,
+            },
+            ChangesetRow {
+                tbl: "entries".into(),
+                row_id: entry_id.clone(),
+                col: "index_status".into(),
+                val: SqlValue::Text("ok".into()),
+                hlc_ts: 1000,
+                hlc_counter: 0,
+                site_id: "remote-site".into(),
+                db_version: 1,
+            },
+            ChangesetRow {
+                tbl: "entries".into(),
+                row_id: entry_id.clone(),
+                col: "index_version".into(),
+                val: SqlValue::Integer(1),
+                hlc_ts: 1000,
+                hlc_counter: 0,
+                site_id: "remote-site".into(),
+                db_version: 1,
+            },
+            ChangesetRow {
+                tbl: "entries".into(),
+                row_id: entry_id.clone(),
+                col: "created_at".into(),
+                val: SqlValue::Text(now.clone()),
+                hlc_ts: 1000,
+                hlc_counter: 0,
+                site_id: "remote-site".into(),
+                db_version: 1,
+            },
+            ChangesetRow {
+                tbl: "entries".into(),
+                row_id: entry_id.clone(),
+                col: "updated_at".into(),
+                val: SqlValue::Text(now.clone()),
+                hlc_ts: 1000,
+                hlc_counter: 0,
+                site_id: "remote-site".into(),
+                db_version: 1,
+            },
+            ChangesetRow {
+                tbl: "entries".into(),
+                row_id: entry_id.clone(),
+                col: "saved_by".into(),
+                val: SqlValue::Text("cli".into()),
+                hlc_ts: 1000,
+                hlc_counter: 0,
+                site_id: "remote-site".into(),
+                db_version: 1,
+            },
+        ];
+
+        let applied = apply_changesets(&mut db, &changesets, &[]).unwrap();
+        assert!(applied > 0, "should apply new row");
+
+        // Verify the row exists
+        let uuid = uuid::Uuid::parse_str(&entry_id).unwrap();
+        let entry = repo::get_entry(db.conn(), &uuid).unwrap();
+        assert_eq!(entry.title, "Remote Entry");
+    }
+
+    #[test]
+    fn test_apply_changesets_lww() {
+        let mut db = test_db();
+
+        // Create a local entry
+        let id = create_test_entry(&mut db, "Original Title");
+        let id_str = id.to_string();
+
+        // Apply a remote change with a HIGHER HLC — should win
+        let high_ts_change = vec![ChangesetRow {
+            tbl: "entries".into(),
+            row_id: id_str.clone(),
+            col: "title".into(),
+            val: SqlValue::Text("Remote Winner".into()),
+            hlc_ts: i64::MAX - 1,
+            hlc_counter: 0,
+            site_id: "remote-site".into(),
+            db_version: 1,
+        }];
+
+        let applied = apply_changesets(&mut db, &high_ts_change, &[]).unwrap();
+        assert_eq!(applied, 1, "higher HLC should win");
+        let entry = repo::get_entry(db.conn(), &id).unwrap();
+        assert_eq!(entry.title, "Remote Winner");
+
+        // Apply a remote change with a LOWER HLC — should lose
+        let low_ts_change = vec![ChangesetRow {
+            tbl: "entries".into(),
+            row_id: id_str.clone(),
+            col: "title".into(),
+            val: SqlValue::Text("Remote Loser".into()),
+            hlc_ts: 1,
+            hlc_counter: 0,
+            site_id: "remote-site".into(),
+            db_version: 2,
+        }];
+
+        let applied = apply_changesets(&mut db, &low_ts_change, &[]).unwrap();
+        assert_eq!(applied, 0, "lower HLC should lose");
+        let entry = repo::get_entry(db.conn(), &id).unwrap();
+        assert_eq!(entry.title, "Remote Winner", "title should not have changed");
+    }
+
+    #[test]
+    fn test_apply_tombstone() {
+        let mut db = test_db();
+
+        let id = create_test_entry(&mut db, "To Be Deleted");
+        let id_str = id.to_string();
+
+        // Verify it exists
+        assert!(row_exists(db.conn(), "entries", &id_str).unwrap());
+
+        // Apply a tombstone with very high HLC
+        let tombstones = vec![TombstoneRow {
+            tbl: "entries".into(),
+            row_id: id_str.clone(),
+            hlc_ts: i64::MAX - 1,
+            hlc_counter: 0,
+            site_id: "remote-site".into(),
+            db_version: 1,
+        }];
+
+        let applied = apply_changesets(&mut db, &[], &tombstones).unwrap();
+        assert_eq!(applied, 1, "tombstone should be applied");
+
+        // Row should be gone
+        assert!(!row_exists(db.conn(), "entries", &id_str).unwrap());
+    }
+
+    #[test]
+    fn test_two_way_sync() {
+        // Create two databases, add different entries to each, simulate sync
+        let mut db_a = test_db();
+        let mut db_b = test_db();
+
+        let id_a = create_test_entry(&mut db_a, "Entry on A");
+        let id_b = create_test_entry(&mut db_b, "Entry on B");
+
+        // Get changesets from A
+        let (cs_a, ts_a) = get_changesets_since(db_a.conn(), 0).unwrap();
+        // Get changesets from B
+        let (cs_b, ts_b) = get_changesets_since(db_b.conn(), 0).unwrap();
+
+        // Apply A's changes to B
+        let applied_on_b = apply_changesets(&mut db_b, &cs_a, &ts_a).unwrap();
+        assert!(applied_on_b > 0, "B should apply A's entries");
+
+        // Apply B's changes to A
+        let applied_on_a = apply_changesets(&mut db_a, &cs_b, &ts_b).unwrap();
+        assert!(applied_on_a > 0, "A should apply B's entries");
+
+        // Both should now have both entries
+        assert!(row_exists(db_a.conn(), "entries", &id_a.to_string()).unwrap());
+        assert!(row_exists(db_a.conn(), "entries", &id_b.to_string()).unwrap());
+        assert!(row_exists(db_b.conn(), "entries", &id_a.to_string()).unwrap());
+        assert!(row_exists(db_b.conn(), "entries", &id_b.to_string()).unwrap());
+
+        // Titles should match
+        let a_on_b = repo::get_entry(db_b.conn(), &id_a).unwrap();
+        assert_eq!(a_on_b.title, "Entry on A");
+        let b_on_a = repo::get_entry(db_a.conn(), &id_b).unwrap();
+        assert_eq!(b_on_a.title, "Entry on B");
+    }
+
+    #[test]
+    fn test_concurrent_edits_converge() {
+        let mut db_a = test_db();
+        let mut db_b = test_db();
+
+        // Create the same entry on both sides (simulate prior sync)
+        let id = create_test_entry(&mut db_a, "Shared Entry");
+        let id_str = id.to_string();
+
+        // Sync A → B to get the entry on both
+        let (cs_a, ts_a) = get_changesets_since(db_a.conn(), 0).unwrap();
+        apply_changesets(&mut db_b, &cs_a, &ts_a).unwrap();
+
+        // Both sides edit the title at "different times"
+        // Use timestamps far in the future to exceed the real HLC from create_test_entry
+        let far_future = i64::MAX / 2;
+
+        // A edits with a high timestamp
+        let site_a = get_site_id(db_a.conn()).unwrap();
+        let ts_a_edit = crate::hlc::HlcTimestamp {
+            wall_ms: far_future,
+            counter: 0,
+            site_id: site_a,
+        };
+        let ver_a = db_a.next_version();
+        crate::change_tracking::log_column_changes(
+            db_a.conn(),
+            &ts_a_edit,
+            ver_a,
+            "entries",
+            &id_str,
+            &[("title", rusqlite::types::Value::Text("Title from A".into()))],
+        )
+        .unwrap();
+        db_a.conn()
+            .execute(
+                "UPDATE entries SET title = 'Title from A' WHERE id = ?1",
+                params![&id_str],
+            )
+            .unwrap();
+
+        // B edits with an even higher timestamp (B wins)
+        let site_b = get_site_id(db_b.conn()).unwrap();
+        let ts_b_edit = crate::hlc::HlcTimestamp {
+            wall_ms: far_future + 1000,
+            counter: 0,
+            site_id: site_b,
+        };
+        let ver_b = db_b.next_version();
+        crate::change_tracking::log_column_changes(
+            db_b.conn(),
+            &ts_b_edit,
+            ver_b,
+            "entries",
+            &id_str,
+            &[("title", rusqlite::types::Value::Text("Title from B".into()))],
+        )
+        .unwrap();
+        db_b.conn()
+            .execute(
+                "UPDATE entries SET title = 'Title from B' WHERE id = ?1",
+                params![&id_str],
+            )
+            .unwrap();
+
+        // Now sync: get each side's changes and apply
+        let ver_a = db_a.db_version();
+        let ver_b = db_b.db_version();
+        // Only get the edit changesets (not the initial sync)
+        let (cs_a2, ts_a2) = get_changesets_since(db_a.conn(), ver_a - 1).unwrap();
+        let (cs_b2, ts_b2) = get_changesets_since(db_b.conn(), ver_b - 1).unwrap();
+
+        apply_changesets(&mut db_a, &cs_b2, &ts_b2).unwrap();
+        apply_changesets(&mut db_b, &cs_a2, &ts_a2).unwrap();
+
+        // Both should converge to B's title (higher HLC)
+        let entry_a = repo::get_entry(db_a.conn(), &id).unwrap();
+        let entry_b = repo::get_entry(db_b.conn(), &id).unwrap();
+        assert_eq!(entry_a.title, "Title from B");
+        assert_eq!(entry_b.title, "Title from B");
+    }
+
+    #[test]
+    fn test_changesets_not_repropagated_to_origin() {
+        let mut db_a = test_db();
+        let mut db_b = test_db();
+
+        // Create an entry on A
+        create_test_entry(&mut db_a, "A's Entry");
+
+        // Sync A → B
+        let (cs_a, ts_a) = get_changesets_since(db_a.conn(), 0).unwrap();
+        apply_changesets(&mut db_b, &cs_a, &ts_a).unwrap();
+
+        // All re-logged changes on B have B's local db_version.
+        // When A sees them, they should not re-apply (same HLC, LWW tie).
+        let (cs_b_back, _) = get_changesets_since(db_b.conn(), 0).unwrap();
+
+        // All re-logged changes on B should have B's site_id in the change_log
+        // (they were logged with log_remote_change which uses the remote's site_id
+        // but B's local db_version). When A asks for changes since ver_a_before,
+        // A should not get them back because they'd have the same HLC and lose
+        // in LWW comparison.
+        for cs in &cs_b_back {
+            if cs.tbl == "entries" {
+                // Should not apply back on A (same or lower HLC)
+                let incoming = HlcTimestamp {
+                    wall_ms: cs.hlc_ts,
+                    counter: cs.hlc_counter,
+                    site_id: cs.site_id.clone(),
+                };
+                let would_apply =
+                    should_apply_column(db_a.conn(), &cs.tbl, &cs.row_id, &cs.col, &incoming)
+                        .unwrap();
+                assert!(
+                    !would_apply,
+                    "changes from A should not be re-applied to A (col={})",
+                    cs.col
+                );
+            }
+        }
+
+        // Double-check: applying all of B's changes to A should result in 0 applied
+        let applied = apply_changesets(&mut db_a, &cs_b_back, &[]).unwrap();
+        assert_eq!(applied, 0, "no changes should be re-applied to origin");
+    }
+
+    #[test]
+    fn test_peer_management() {
+        let db = test_db();
+        let conn = db.conn();
+
+        // Initially no peers
+        let peers = get_sync_peers(conn).unwrap();
+        assert!(peers.is_empty());
+
+        // Add a peer
+        add_sync_peer(conn, "peer-1", Some("Test Peer")).unwrap();
+        let peers = get_sync_peers(conn).unwrap();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].id, "peer-1");
+        assert_eq!(peers[0].name.as_deref(), Some("Test Peer"));
+        assert_eq!(peers[0].last_db_version, 0);
+
+        // Update peer version
+        update_peer_version(conn, "peer-1", 42).unwrap();
+        let ver = get_peer_db_version(conn, "peer-1").unwrap();
+        assert_eq!(ver, 42);
+
+        // Remove peer
+        remove_sync_peer(conn, "peer-1").unwrap();
+        let peers = get_sync_peers(conn).unwrap();
+        assert!(peers.is_empty());
+
+        // Unknown peer returns version 0
+        let ver = get_peer_db_version(conn, "unknown").unwrap();
+        assert_eq!(ver, 0);
+    }
+
+    #[test]
+    fn test_rebuild_fts_after_sync() {
+        let mut db = test_db();
+
+        // Create an entry so FTS has something
+        let id = create_test_entry(&mut db, "FTS Test Entry");
+
+        // Simulate changeset referencing this entry's content
+        let changesets = vec![ChangesetRow {
+            tbl: "entry_content".into(),
+            row_id: id.to_string(),
+            col: "extracted_text".into(),
+            val: SqlValue::Text("updated text".into()),
+            hlc_ts: 1000,
+            hlc_counter: 0,
+            site_id: "remote".into(),
+            db_version: 1,
+        }];
+
+        // Should not panic
+        rebuild_fts_after_sync(db.conn(), &changesets).unwrap();
+    }
+
+    #[test]
+    fn test_every_write_creates_change_log() {
+        let mut db = test_db();
+
+        let count_changes = |conn: &Connection| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM change_log", [], |row| row.get(0))
+                .unwrap()
+        };
+
+        // Baseline (migration seeding may have added some)
+        let before = count_changes(db.conn());
+
+        // create_entry
+        let id = create_test_entry(&mut db, "Change Log Test");
+        let after_create = count_changes(db.conn());
+        assert!(after_create > before, "create_entry should add change_log entries");
+
+        // update_entry_tags
+        let _ = repo::update_entry_tags(&mut db, &id, &["tag1".into(), "tag2".into()]).unwrap();
+        let after_tags = count_changes(db.conn());
+        assert!(after_tags > after_create, "update_entry_tags should add change_log entries");
+
+        // delete_entry
+        repo::delete_entry(&mut db, &id).unwrap();
+        let after_delete = count_changes(db.conn());
+        assert!(after_delete > after_tags, "delete_entry should add change_log entries");
+
+        // Verify tombstone was created
+        let tombstone_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM tombstones WHERE tbl = 'entries' AND row_id = ?1",
+                params![id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tombstone_count, 1, "delete should create a tombstone");
+    }
+
+    #[test]
+    fn test_sql_value_roundtrip() {
+        // Test serialization/deserialization of all SqlValue variants
+        let values = vec![
+            SqlValue::Null,
+            SqlValue::Integer(42),
+            SqlValue::Real(1.23456),
+            SqlValue::Text("hello".into()),
+            SqlValue::Blob(base64::engine::general_purpose::STANDARD.encode(b"\x00\x01\x02")),
+        ];
+
+        for val in &values {
+            let json = serde_json::to_string(val).unwrap();
+            let back: SqlValue = serde_json::from_str(&json).unwrap();
+
+            let rv_original = val.to_rusqlite();
+            let rv_back = back.to_rusqlite();
+            assert_eq!(
+                format!("{rv_original:?}"),
+                format!("{rv_back:?}"),
+                "roundtrip failed for {val:?}"
+            );
+        }
+    }
 }
