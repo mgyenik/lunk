@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use iroh::endpoint::presets;
 use iroh::endpoint::Connection;
 use iroh::protocol::{AcceptError, ProtocolHandler, Router};
 use iroh::{Endpoint, EndpointId, SecretKey};
@@ -25,7 +26,7 @@ impl SyncNode {
     pub async fn new(data_dir: &Path, db: DbPool) -> Result<Self> {
         let secret_key = load_or_create_secret_key(data_dir)?;
 
-        let endpoint = Endpoint::builder()
+        let endpoint = Endpoint::builder(presets::N0)
             .secret_key(secret_key)
             .alpns(vec![SYNC_ALPN.to_vec()])
             .bind()
