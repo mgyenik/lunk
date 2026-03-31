@@ -370,7 +370,7 @@ fn handle_save_entry(
         title
     };
 
-    let req = CreateEntryRequest {
+    let mut req = CreateEntryRequest {
         url,
         title,
         content_type,
@@ -381,6 +381,31 @@ fn handle_save_entry(
         tags,
         source: SaveSource::Extension,
     };
+
+    // For PDFs: extract text server-side (extension only sends raw bytes)
+    if req.content_type == ContentType::Pdf
+        && let Some(ref pdf_bytes) = req.pdf_data
+    {
+            let pages = lunk_core::pdf::extract_pages(pdf_bytes);
+            let full_text: String = pages
+                .iter()
+                .map(|(_, t)| t.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+
+            if pages.is_empty() {
+                tracing::warn!(
+                    title = %req.title,
+                    "PDF text extraction failed — entry will be saved but not searchable"
+                );
+            }
+
+            if !full_text.is_empty() {
+                req.extracted_text = full_text;
+            }
+
+            return repo::create_pdf_entry(db, req, pages);
+    }
 
     repo::create_entry(db, req)
 }
