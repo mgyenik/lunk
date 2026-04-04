@@ -1,15 +1,19 @@
 <script lang="ts">
   import { fade, fly } from 'svelte/transition';
-  import Sidebar from './lib/Sidebar.svelte';
+  import NavRail from './lib/NavRail.svelte';
+  import HomeView from './lib/HomeView.svelte';
   import SearchBar from './lib/SearchBar.svelte';
   import EntryList from './lib/EntryList.svelte';
+  import EntryGrid from './lib/EntryGrid.svelte';
   import EntryView from './lib/EntryView.svelte';
   import SyncPanel from './lib/SyncPanel.svelte';
-  import { api, type Entry, type SearchHit } from './api';
+  import { api, type Entry, type SearchHit, type TopicSummary, type ArchiveStats } from './api';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { open } from '@tauri-apps/plugin-dialog';
 
-  let currentView = $state<'all' | 'search' | 'sync'>('all');
+  type ViewType = 'home' | 'browse' | 'search' | 'detail' | 'sync';
+
+  let currentView = $state<ViewType>('home');
   let entries = $state<(Entry | SearchHit)[]>([]);
   let totalCount = $state(0);
   let selectedEntry = $state<Entry | null>(null);
@@ -18,24 +22,38 @@
   let isLoading = $state(false);
   let isDragOver = $state(false);
 
-  // Filtering
-  let activeTag = $state<string | null>(null);
-  let contentTypeFilter = $state<'all' | 'article' | 'pdf'>('all');
-  let tagsRefreshKey = $state(0);
+  // Home data
+  let topics = $state<TopicSummary[]>([]);
+  let stats = $state<ArchiveStats | null>(null);
+  let recentEntries = $state<Entry[]>([]);
 
-  async function loadEntries() {
+  // Browse state
+  let activeTopic = $state<string | null>(null);
+
+  async function loadHomeData() {
+    try {
+      const [t, s, r] = await Promise.all([
+        api.getTopics(),
+        api.getArchiveStats(),
+        api.listEntries({ limit: 8 }),
+      ]);
+      topics = t;
+      stats = s;
+      recentEntries = r.entries;
+    } catch (err) {
+      console.error('Failed to load home data:', err);
+    }
+  }
+
+  async function loadBrowseEntries() {
     isLoading = true;
     try {
-      if (currentView === 'search' && searchQuery.trim()) {
-        const result = await api.search(searchQuery, 100);
+      if (activeTopic) {
+        const result = await api.getTopicEntries(activeTopic);
         entries = result.entries;
         totalCount = result.total;
       } else {
-        const result = await api.listEntries({
-          tag: activeTag ?? undefined,
-          contentType: contentTypeFilter === 'all' ? undefined : contentTypeFilter,
-          limit: 100,
-        });
+        const result = await api.listEntries({ limit: 100 });
         entries = result.entries;
         totalCount = result.total;
       }
@@ -46,64 +64,78 @@
     }
   }
 
-  // Reload when filters change
-  $effect(() => {
-    // Track dependencies
-    activeTag;
-    contentTypeFilter;
-    if (currentView !== 'sync' && currentView !== 'search') {
-      loadEntries();
+  async function loadSearchResults() {
+    if (!searchQuery.trim()) return;
+    isLoading = true;
+    try {
+      const result = await api.search(searchQuery, 100);
+      entries = result.entries;
+      totalCount = result.total;
+    } catch (err) {
+      console.error('Failed to search:', err);
+    } finally {
+      isLoading = false;
     }
-  });
+  }
 
-  function handleNavigate(view: 'all' | 'sync') {
+  function handleNavigate(view: 'home' | 'sync') {
     currentView = view;
     selectedEntry = null;
     selectedMatchedPage = undefined;
     searchQuery = '';
-    if (view === 'all') {
-      activeTag = null;
-      contentTypeFilter = 'all';
-    }
+    activeTopic = null;
+    if (view === 'home') loadHomeData();
   }
 
   function handleSearch(query: string) {
     searchQuery = query;
     if (query.trim()) {
       currentView = 'search';
+      loadSearchResults();
     } else {
-      currentView = 'all';
+      currentView = 'home';
+      loadHomeData();
     }
     selectedEntry = null;
     selectedMatchedPage = undefined;
-    loadEntries();
   }
 
-  function handleTagSelect(tag: string | null) {
-    activeTag = tag;
-    currentView = 'all';
-    selectedEntry = null;
-    selectedMatchedPage = undefined;
-    searchQuery = '';
+  function handleTopicSelect(label: string) {
+    activeTopic = label;
+    currentView = 'browse';
+    loadBrowseEntries();
   }
 
-  function handleContentTypeFilter(type: 'all' | 'article' | 'pdf') {
-    contentTypeFilter = type;
+  function handleBrowseAll() {
+    activeTopic = null;
+    currentView = 'browse';
+    loadBrowseEntries();
   }
 
   function handleSelect(entry: Entry, matchedPage?: number) {
     selectedEntry = entry;
     selectedMatchedPage = matchedPage;
+    currentView = 'detail';
+  }
+
+  function handleBack() {
+    selectedEntry = null;
+    selectedMatchedPage = undefined;
+    // Go back to wherever we came from
+    if (searchQuery.trim()) {
+      currentView = 'search';
+    } else if (activeTopic !== null) {
+      currentView = 'browse';
+    } else {
+      currentView = 'home';
+    }
   }
 
   async function handleTagsChange(id: string, tags: string[]) {
     try {
       const updated = await api.updateTags(id, tags);
-      if (selectedEntry?.id === id) {
-        selectedEntry = updated;
-      }
-      tagsRefreshKey++;
-      loadEntries();
+      if (selectedEntry?.id === id) selectedEntry = updated;
+      loadHomeData();
     } catch (err) {
       console.error('Failed to update tags:', err);
     }
@@ -115,17 +147,12 @@
       if (selectedEntry?.id === id) {
         selectedEntry = null;
         selectedMatchedPage = undefined;
+        currentView = 'home';
       }
-      tagsRefreshKey++;
-      loadEntries();
+      loadHomeData();
     } catch (err) {
       console.error('Failed to delete:', err);
     }
-  }
-
-  function handleBack() {
-    selectedEntry = null;
-    selectedMatchedPage = undefined;
   }
 
   async function handleImportPdf() {
@@ -136,8 +163,7 @@
     if (path) {
       try {
         await api.importPdf(path as string);
-        tagsRefreshKey++;
-        loadEntries();
+        loadHomeData();
       } catch (err) {
         console.error('Failed to import PDF:', err);
       }
@@ -160,7 +186,7 @@
         for (const path of paths) {
           if (path.toLowerCase().endsWith('.pdf')) {
             api.importPdf(path)
-              .then(() => { tagsRefreshKey++; loadEntries(); })
+              .then(() => loadHomeData())
               .catch(err => console.error('Drop import failed:', err));
           }
         }
@@ -169,6 +195,9 @@
 
     return () => { unlisten?.(); };
   });
+
+  // Load home data on startup
+  loadHomeData();
 </script>
 
 <div class="flex h-full bg-surface relative">
@@ -180,50 +209,44 @@
     </div>
   {/if}
 
-  <Sidebar
-    {currentView}
-    {activeTag}
-    {tagsRefreshKey}
-    onNavigate={handleNavigate}
-    onTagSelect={handleTagSelect}
-    onImportPdf={handleImportPdf}
-  />
+  <NavRail {currentView} onNavigate={handleNavigate} onImportPdf={handleImportPdf} />
 
   <div class="flex-1 flex flex-col min-w-0">
-    {#if currentView === 'sync'}
-      <SyncPanel />
-    {:else}
-      <SearchBar
-        value={searchQuery}
+    {#if currentView === 'home'}
+      <HomeView
+        {topics} {stats} {recentEntries}
         onSearch={handleSearch}
+        onTopicSelect={handleTopicSelect}
+        onEntrySelect={handleSelect}
+        onBrowseAll={handleBrowseAll}
       />
-
-      {#if selectedEntry}
-        <div class="flex-1 min-h-0" in:fly={{ x: 20, duration: 150 }} out:fade={{ duration: 80 }}>
-          <EntryView
-            entry={selectedEntry}
-            initialPage={selectedMatchedPage}
-            onBack={handleBack}
-            onTagsChange={handleTagsChange}
-            onDelete={handleDelete}
-          />
-        </div>
-      {:else}
-        <div class="flex-1 min-h-0" in:fade={{ duration: 100 }}>
-          <EntryList
-            {entries}
-            {totalCount}
-            {isLoading}
-            {currentView}
-            {searchQuery}
-            {activeTag}
-            {contentTypeFilter}
-            onSelect={handleSelect}
-            onTagsChange={handleTagsChange}
-            onContentTypeFilter={handleContentTypeFilter}
-          />
-        </div>
-      {/if}
+    {:else if currentView === 'detail' && selectedEntry}
+      <div class="flex-1 min-h-0 flex flex-col" in:fly={{ x: 20, duration: 150 }} out:fade={{ duration: 80 }}>
+        <EntryView
+          entry={selectedEntry}
+          initialPage={selectedMatchedPage}
+          onBack={handleBack}
+          onTagsChange={handleTagsChange}
+          onDelete={handleDelete}
+        />
+      </div>
+    {:else if currentView === 'search'}
+      <SearchBar value={searchQuery} onSearch={handleSearch} />
+      <EntryList
+        {entries} {totalCount} {isLoading}
+        currentView="search"
+        {searchQuery}
+        onSelect={handleSelect}
+      />
+    {:else if currentView === 'browse'}
+      <EntryGrid
+        {entries} {totalCount} {isLoading}
+        {activeTopic}
+        onSelect={handleSelect}
+        onBack={() => handleNavigate('home')}
+      />
+    {:else if currentView === 'sync'}
+      <SyncPanel />
     {/if}
   </div>
 </div>

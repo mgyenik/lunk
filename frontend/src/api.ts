@@ -78,6 +78,20 @@ export interface SyncResultItem {
   error: string | null;
 }
 
+export interface TopicSummary {
+  label: string;
+  entry_count: number;
+  sample_titles: string[];
+}
+
+export interface ArchiveStats {
+  total_entries: number;
+  pdf_count: number;
+  article_count: number;
+  domain_count: number;
+  recent_count: number;
+}
+
 export interface TagSuggestions {
   domain_tags: string[];
   similar_tags: string[];
@@ -145,6 +159,18 @@ export const api = {
 
   triggerSync(): Promise<SyncResultItem[]> {
     return invoke('trigger_sync');
+  },
+
+  getTopics(): Promise<TopicSummary[]> {
+    return invoke('get_topics');
+  },
+
+  getTopicEntries(label: string): Promise<ListResult> {
+    return invoke('get_topic_entries', { label });
+  },
+
+  getArchiveStats(): Promise<ArchiveStats> {
+    return invoke('get_archive_stats');
   },
 };
 

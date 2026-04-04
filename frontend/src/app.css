@@ -112,6 +112,17 @@ mark {
   opacity: 0.03;
 }
 
+/* ── Card grid ── */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+/* ── Horizontal scroll (hide scrollbar) ── */
+.scroll-x-hidden::-webkit-scrollbar { display: none; }
+.scroll-x-hidden { scrollbar-width: none; }
+
 /* ── Prose (reader mode) ── */
 .prose { max-width: 65ch; }
 .prose h1, .prose h2, .prose h3 { font-weight: 600; }
