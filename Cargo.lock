@@ -3561,6 +3561,8 @@ version = "0.4.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "http-body-util",
+ "hyper",
  "lunk-core",
  "serde",
  "serde_json",

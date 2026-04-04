@@ -233,6 +233,7 @@ async fn create_entry(
 }
 
 /// Generate embedding and extract keywords for a newly created entry.
+/// Logs a warning and continues if this fails — save always succeeds.
 fn embed_and_extract_keywords(state: &AppState, entry: &Entry) {
     use lunk_core::{embeddings, keywords};
     let entry_id = entry.id;
@@ -506,4 +507,116 @@ async fn trigger_sync(
         .collect();
 
     Ok(Json(response))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode as SC};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    use lunk_core::db;
+    use lunk_core::embeddings::EmbeddingModel;
+
+    use std::sync::LazyLock;
+
+    // Shared model instance across all tests (loaded once).
+    // Falls back to project root cache or downloads on first run.
+    static MODEL: LazyLock<EmbeddingModel> = LazyLock::new(|| {
+        // Try project root cache first (where build.rs puts it)
+        let candidates = [
+            std::path::PathBuf::from("../../.fastembed_cache"),
+            std::path::PathBuf::from(".fastembed_cache"),
+        ];
+        for dir in &candidates {
+            if dir.exists()
+                && let Ok(m) = EmbeddingModel::new(Some(dir))
+            {
+                return m;
+            }
+        }
+        EmbeddingModel::new(None).expect("embedding model required for server tests")
+    });
+
+    fn test_app() -> Router {
+        let db = db::open_in_memory_db().unwrap();
+        let pool = db::create_pool(db);
+        let state = crate::state::AppState {
+            db: pool,
+            embedding_model: MODEL.clone(),
+            sync_node: None,
+        };
+        crate::build_router(state)
+    }
+
+    async fn get_json(app: &Router, path: &str) -> (SC, serde_json::Value) {
+        let req = Request::get(path).body(Body::empty()).unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        (status, json)
+    }
+
+    #[tokio::test]
+    async fn test_list_entries_empty() {
+        let app = test_app();
+        let (status, json) = get_json(&app, "/api/v1/entries").await;
+        assert_eq!(status, SC::OK);
+        assert_eq!(json["total"], 0);
+        assert!(json["entries"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_search_empty() {
+        let app = test_app();
+        let (status, json) = get_json(&app, "/api/v1/search?q=test").await;
+        assert_eq!(status, SC::OK);
+        assert_eq!(json["total"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_nonexistent_entry() {
+        let app = test_app();
+        let (status, _) = get_json(&app, "/api/v1/entries/019aaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").await;
+        assert_eq!(status, SC::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_get_tags_empty() {
+        let app = test_app();
+        let (status, json) = get_json(&app, "/api/v1/tags").await;
+        assert_eq!(status, SC::OK);
+        assert!(json.as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_and_get_entry() {
+        let app = test_app();
+
+        let body = serde_json::json!({
+            "url": "https://example.com/test",
+            "title": "Test Article",
+            "content_type": "article",
+            "extracted_text": "This is a test article about Rust programming."
+        });
+
+        let req = Request::post("/api/v1/entries")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), SC::CREATED);
+
+        let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+        let entry: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        let id = entry["id"].as_str().unwrap();
+
+        // Verify we can GET it back
+        let (status, got) = get_json(&app, &format!("/api/v1/entries/{id}")).await;
+        assert_eq!(status, SC::OK);
+        assert_eq!(got["title"], "Test Article");
+    }
 }

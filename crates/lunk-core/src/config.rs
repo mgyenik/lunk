@@ -158,3 +158,47 @@ fn project_dirs() -> Result<ProjectDirs> {
     ProjectDirs::from("com", "lunk", "lunk")
         .ok_or_else(|| LunkError::Config("could not determine home directory".to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config_valid() {
+        let config = Config::default();
+        assert!(config.server.port > 0);
+        assert!(!config.server.bind.is_empty());
+        assert!(config.sync.interval_secs > 0);
+    }
+
+    #[test]
+    fn test_dev_profile_defaults() {
+        let config = Config::defaults_for("dev");
+        assert_eq!(config.server.port, 9724);
+        assert_eq!(config.logging.level, "debug");
+    }
+
+    #[test]
+    fn test_default_profile_defaults() {
+        let config = Config::defaults_for("default");
+        assert_eq!(config.server.port, 9723);
+        assert_eq!(config.logging.level, "info");
+    }
+
+    #[test]
+    fn test_config_roundtrip_toml() {
+        let config = Config::defaults_for("default");
+        let toml_str = toml::to_string(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.server.port, config.server.port);
+        assert_eq!(parsed.sync.enabled, config.sync.enabled);
+    }
+
+    #[test]
+    fn test_db_path_resolves() {
+        let result = Config::db_path();
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.to_str().unwrap().contains("lunk"));
+    }
+}

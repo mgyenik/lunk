@@ -227,3 +227,78 @@ where
     f(&mut db)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_open_in_memory_db() {
+        let db = open_in_memory_db().unwrap();
+        // Should have tables created by migrations
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table'", [], |r| r.get(0))
+            .unwrap();
+        assert!(count > 5, "should have created tables via migrations");
+    }
+
+    #[test]
+    fn test_db_version_non_negative() {
+        let db = open_in_memory_db().unwrap();
+        assert!(db.db_version() >= 0);
+    }
+
+    #[test]
+    fn test_db_next_version_increments() {
+        let mut db = open_in_memory_db().unwrap();
+        let base = db.db_version();
+        let v1 = db.next_version();
+        let v2 = db.next_version();
+        assert_eq!(v1, base + 1);
+        assert_eq!(v2, base + 2);
+    }
+
+    #[test]
+    fn test_db_pool_with_db() {
+        let db = open_in_memory_db().unwrap();
+        let pool = create_pool(db);
+
+        let result = with_db(&pool, |conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM entries", [], |r| r.get(0),
+            )?;
+            Ok(count)
+        })
+        .unwrap();
+
+        assert_eq!(result, 0); // empty database
+    }
+
+    #[test]
+    fn test_db_pool_with_db_mut() {
+        let db = open_in_memory_db().unwrap();
+        let pool = create_pool(db);
+
+        let base = with_db(&pool, |conn| {
+            let v: i64 = conn.query_row("SELECT COALESCE((SELECT value FROM sync_meta WHERE key = 'db_version'), '0')", [], |r| {
+                let s: String = r.get(0)?;
+                Ok(s.parse::<i64>().unwrap_or(0))
+            })?;
+            Ok(v)
+        }).unwrap();
+
+        let version = with_db_mut(&pool, |db| Ok(db.next_version())).unwrap();
+        assert_eq!(version, base + 1);
+    }
+
+    #[test]
+    fn test_hlc_integration() {
+        let mut db = open_in_memory_db().unwrap();
+        let (ts1, v1) = db.next_timestamp();
+        let (ts2, v2) = db.next_timestamp();
+        // Timestamps should be monotonically increasing
+        assert!(ts2 > ts1);
+        assert_eq!(v2, v1 + 1);
+    }
+}
+
