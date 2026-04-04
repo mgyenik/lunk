@@ -1,16 +1,19 @@
 <script lang="ts">
-  import { formatDate, type Entry, type TopicSummary, type ArchiveStats } from '../api';
+  import FilterChip from './FilterChip.svelte';
+  import { formatDate, type Entry, type TopicSummary, type ArchiveStats, type TagWithCount } from '../api';
 
   interface Props {
     topics: TopicSummary[];
     stats: ArchiveStats | null;
     recentEntries: Entry[];
+    allTags: TagWithCount[];
     onSearch: (query: string) => void;
     onTopicSelect: (label: string) => void;
     onEntrySelect: (entry: Entry) => void;
     onBrowseAll: () => void;
+    onTagSelect: (tag: string) => void;
   }
-  let { topics, stats, recentEntries, onSearch, onTopicSelect, onEntrySelect, onBrowseAll }: Props = $props();
+  let { topics, stats, recentEntries, allTags, onSearch, onTopicSelect, onEntrySelect, onBrowseAll, onTagSelect }: Props = $props();
 
   let searchValue = $state('');
   let searchEl = $state<HTMLInputElement | undefined>(undefined);
@@ -129,25 +132,21 @@
         <div class="mb-8">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-tertiary">Recent</h3>
-            <button
-              class="text-[11px] text-text-tertiary hover:text-accent transition-colors"
-              onclick={onBrowseAll}
-            >Browse all &rarr;</button>
+            <button class="text-[11px] text-text-tertiary hover:text-accent transition-colors" onclick={onBrowseAll}>
+              Browse all &rarr;
+            </button>
           </div>
           <div class="flex gap-3 overflow-x-auto pb-2 scroll-x-hidden">
             {#each recentEntries as entry (entry.id)}
               <button
-                class="shrink-0 w-[160px] p-3 rounded-lg bg-surface-raised border border-border-subtle text-left
+                class="shrink-0 w-[172px] p-3 rounded-lg bg-surface-raised border border-border-subtle text-left
                   hover:border-accent/30 hover:shadow-sm transition-all cursor-pointer group"
                 onclick={() => onEntrySelect(entry)}
               >
                 <div class="flex items-center gap-1.5 mb-2">
                   {#if entry.content_type === 'article' && entry.domain}
-                    <img
-                      src="https://www.google.com/s2/favicons?domain={entry.domain}&sz=16"
-                      alt="" class="w-3.5 h-3.5 rounded-sm"
-                      onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                    />
+                    <img src="https://www.google.com/s2/favicons?domain={entry.domain}&sz=16" alt="" class="w-3.5 h-3.5 rounded-sm"
+                      onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                   {:else}
                     <div class="w-3.5 h-3.5 rounded-sm {entry.content_type === 'pdf' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-accent-soft'} flex items-center justify-center">
                       <span class="text-[7px] font-bold {entry.content_type === 'pdf' ? 'text-red-400' : 'text-accent'}">{entryInitial(entry)}</span>
@@ -158,8 +157,32 @@
                 <h4 class="text-[12px] font-semibold text-text-primary line-clamp-2 leading-snug mb-1.5 group-hover:text-accent transition-colors">
                   {entry.title}
                 </h4>
+                {#if entry.tags.length > 0}
+                  <div class="flex gap-1 flex-wrap mb-1.5">
+                    {#each entry.tags.slice(0, 2) as tag}
+                      <span class="font-brand text-[8px] px-1 py-px rounded bg-accent-soft text-accent">#<!-- -->{tag}</span>
+                    {/each}
+                  </div>
+                {/if}
                 <span class="font-brand text-[9px] text-text-tertiary">{formatDate(entry.created_at)}</span>
               </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <!-- Tags -->
+      {#if allTags.length > 0}
+        <div class="mb-8">
+          <h3 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-tertiary mb-3">Tags</h3>
+          <div class="flex flex-wrap gap-1.5">
+            {#each allTags as tag}
+              <FilterChip
+                label={tag.name}
+                variant="tag"
+                count={tag.count}
+                onclick={() => onTagSelect(tag.name)}
+              />
             {/each}
           </div>
         </div>

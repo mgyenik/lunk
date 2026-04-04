@@ -3,11 +3,12 @@
   import NavRail from './lib/NavRail.svelte';
   import HomeView from './lib/HomeView.svelte';
   import SearchBar from './lib/SearchBar.svelte';
+  import FilterBar from './lib/FilterBar.svelte';
   import EntryList from './lib/EntryList.svelte';
   import EntryGrid from './lib/EntryGrid.svelte';
   import EntryView from './lib/EntryView.svelte';
   import SyncPanel from './lib/SyncPanel.svelte';
-  import { api, type Entry, type SearchHit, type TopicSummary, type ArchiveStats } from './api';
+  import { api, type Entry, type SearchHit, type TopicSummary, type ArchiveStats, type TagWithCount } from './api';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { open } from '@tauri-apps/plugin-dialog';
 
@@ -26,20 +27,38 @@
   let topics = $state<TopicSummary[]>([]);
   let stats = $state<ArchiveStats | null>(null);
   let recentEntries = $state<Entry[]>([]);
+  let allTags = $state<TagWithCount[]>([]);
+
+  // Composable filter state — tag, domain, and content type can combine
+  let filterTag = $state<string | null>(null);
+  let filterDomain = $state<string | null>(null);
+  let filterContentType = $state<'all' | 'article' | 'pdf'>('all');
 
   // Browse state
   let activeTopic = $state<string | null>(null);
 
+  const hasFilters = $derived(filterTag !== null || filterDomain !== null || filterContentType !== 'all');
+  const browseTitle = $derived(() => {
+    if (activeTopic) return activeTopic;
+    const parts: string[] = [];
+    if (filterTag) parts.push(`#${filterTag}`);
+    if (filterDomain) parts.push(filterDomain);
+    if (filterContentType !== 'all') parts.push(filterContentType === 'pdf' ? 'PDFs' : 'Articles');
+    return parts.length > 0 ? parts.join(' + ') : 'All Entries';
+  });
+
   async function loadHomeData() {
     try {
-      const [t, s, r] = await Promise.all([
+      const [t, s, r, tags] = await Promise.all([
         api.getTopics(),
         api.getArchiveStats(),
         api.listEntries({ limit: 8 }),
+        api.getTags(),
       ]);
       topics = t;
       stats = s;
       recentEntries = r.entries;
+      allTags = tags;
     } catch (err) {
       console.error('Failed to load home data:', err);
     }
@@ -53,7 +72,12 @@
         entries = result.entries;
         totalCount = result.total;
       } else {
-        const result = await api.listEntries({ limit: 100 });
+        const result = await api.listEntries({
+          tag: filterTag ?? undefined,
+          domain: filterDomain ?? undefined,
+          contentType: filterContentType === 'all' ? undefined : filterContentType,
+          limit: 100,
+        });
         entries = result.entries;
         totalCount = result.total;
       }
@@ -78,12 +102,15 @@
     }
   }
 
+  // --- Navigation handlers ---
+
   function handleNavigate(view: 'home' | 'sync') {
     currentView = view;
     selectedEntry = null;
     selectedMatchedPage = undefined;
     searchQuery = '';
     activeTopic = null;
+    clearAllFilters();
     if (view === 'home') loadHomeData();
   }
 
@@ -97,17 +124,18 @@
       loadHomeData();
     }
     selectedEntry = null;
-    selectedMatchedPage = undefined;
   }
 
   function handleTopicSelect(label: string) {
     activeTopic = label;
+    clearAllFilters();
     currentView = 'browse';
     loadBrowseEntries();
   }
 
   function handleBrowseAll() {
     activeTopic = null;
+    clearAllFilters();
     currentView = 'browse';
     loadBrowseEntries();
   }
@@ -121,15 +149,55 @@
   function handleBack() {
     selectedEntry = null;
     selectedMatchedPage = undefined;
-    // Go back to wherever we came from
     if (searchQuery.trim()) {
       currentView = 'search';
-    } else if (activeTopic !== null) {
+    } else if (activeTopic !== null || hasFilters) {
       currentView = 'browse';
     } else {
       currentView = 'home';
     }
   }
+
+  // --- Filter handlers (the core new functionality) ---
+
+  function handleFilterTag(tag: string) {
+    filterTag = tag;
+    activeTopic = null;
+    selectedEntry = null;
+    currentView = 'browse';
+    loadBrowseEntries();
+  }
+
+  function handleFilterDomain(domain: string) {
+    filterDomain = domain;
+    activeTopic = null;
+    selectedEntry = null;
+    currentView = 'browse';
+    loadBrowseEntries();
+  }
+
+  function handleFilterContentType(type: 'all' | 'article' | 'pdf') {
+    filterContentType = type;
+    activeTopic = null;
+    selectedEntry = null;
+    currentView = 'browse';
+    loadBrowseEntries();
+  }
+
+  function handleSearchKeyword(keyword: string) {
+    searchQuery = keyword;
+    currentView = 'search';
+    selectedEntry = null;
+    loadSearchResults();
+  }
+
+  function clearAllFilters() {
+    filterTag = null;
+    filterDomain = null;
+    filterContentType = 'all';
+  }
+
+  // --- Entry mutation handlers ---
 
   async function handleTagsChange(id: string, tags: string[]) {
     try {
@@ -146,7 +214,6 @@
       await api.deleteEntry(id);
       if (selectedEntry?.id === id) {
         selectedEntry = null;
-        selectedMatchedPage = undefined;
         currentView = 'home';
       }
       loadHomeData();
@@ -196,7 +263,6 @@
     return () => { unlisten?.(); };
   });
 
-  // Load home data on startup
   loadHomeData();
 </script>
 
@@ -214,11 +280,12 @@
   <div class="flex-1 flex flex-col min-w-0">
     {#if currentView === 'home'}
       <HomeView
-        {topics} {stats} {recentEntries}
+        {topics} {stats} {recentEntries} {allTags}
         onSearch={handleSearch}
         onTopicSelect={handleTopicSelect}
         onEntrySelect={handleSelect}
         onBrowseAll={handleBrowseAll}
+        onTagSelect={handleFilterTag}
       />
     {:else if currentView === 'detail' && selectedEntry}
       <div class="flex-1 min-h-0 flex flex-col" in:fly={{ x: 20, duration: 150 }} out:fade={{ duration: 80 }}>
@@ -229,6 +296,9 @@
           onTagsChange={handleTagsChange}
           onDelete={handleDelete}
           onNavigate={(e) => handleSelect(e)}
+          onTagClick={handleFilterTag}
+          onDomainClick={handleFilterDomain}
+          onKeywordClick={handleSearchKeyword}
         />
       </div>
     {:else if currentView === 'search'}
@@ -238,13 +308,27 @@
         currentView="search"
         {searchQuery}
         onSelect={handleSelect}
+        onTagClick={handleFilterTag}
+        onDomainClick={handleFilterDomain}
       />
     {:else if currentView === 'browse'}
+      <FilterBar
+        tag={filterTag}
+        domain={filterDomain}
+        contentType={filterContentType}
+        onClearTag={() => { filterTag = null; loadBrowseEntries(); }}
+        onClearDomain={() => { filterDomain = null; loadBrowseEntries(); }}
+        onClearContentType={() => { filterContentType = 'all'; loadBrowseEntries(); }}
+        onClearAll={() => { clearAllFilters(); loadBrowseEntries(); }}
+      />
       <EntryGrid
         {entries} {totalCount} {isLoading}
-        {activeTopic}
+        title={browseTitle()}
         onSelect={handleSelect}
         onBack={() => handleNavigate('home')}
+        onTagClick={handleFilterTag}
+        onDomainClick={handleFilterDomain}
+        onContentTypeClick={handleFilterContentType}
       />
     {:else if currentView === 'sync'}
       <SyncPanel />

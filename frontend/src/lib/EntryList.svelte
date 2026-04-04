@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FilterChip from './FilterChip.svelte';
   import { formatDate, type Entry, type SearchHit } from '../api';
 
   interface Props {
@@ -8,15 +9,14 @@
     currentView: string;
     searchQuery: string;
     onSelect: (entry: Entry, matchedPage?: number) => void;
+    onTagClick: (tag: string) => void;
+    onDomainClick: (domain: string) => void;
   }
-  let { entries, totalCount, isLoading, currentView, searchQuery, onSelect }: Props = $props();
+  let { entries, totalCount, isLoading, currentView, searchQuery, onSelect, onTagClick, onDomainClick }: Props = $props();
 
   let focusedIndex = $state(-1);
 
-  $effect(() => {
-    entries;
-    focusedIndex = -1;
-  });
+  $effect(() => { entries; focusedIndex = -1; });
 
   function hasSnippet(entry: Entry | SearchHit): entry is SearchHit {
     return 'snippet' in entry && entry.snippet !== null;
@@ -31,20 +31,14 @@
     if (entries.length === 0) return;
     switch (e.key) {
       case 'j': case 'ArrowDown':
-        e.preventDefault();
-        focusedIndex = Math.min(focusedIndex + 1, entries.length - 1);
-        scrollToFocused();
-        break;
+        e.preventDefault(); focusedIndex = Math.min(focusedIndex + 1, entries.length - 1); scrollToFocused(); break;
       case 'k': case 'ArrowUp':
-        e.preventDefault();
-        focusedIndex = Math.max(focusedIndex - 1, 0);
-        scrollToFocused();
-        break;
+        e.preventDefault(); focusedIndex = Math.max(focusedIndex - 1, 0); scrollToFocused(); break;
       case 'Enter':
         if (focusedIndex >= 0 && focusedIndex < entries.length) {
           const entry = entries[focusedIndex];
-          const matchedPage = 'matched_page' in entry ? (entry as SearchHit).matched_page ?? undefined : undefined;
-          onSelect(entry, matchedPage);
+          const mp = 'matched_page' in entry ? (entry as SearchHit).matched_page ?? undefined : undefined;
+          onSelect(entry, mp);
         }
         break;
     }
@@ -98,11 +92,8 @@
             <div class="w-7 h-7 rounded-md shrink-0 flex items-center justify-center mt-0.5
               {entry.content_type === 'pdf' ? 'bg-red-50 dark:bg-red-950/30' : 'bg-accent-soft'}">
               {#if entry.content_type === 'article' && entry.domain}
-                <img
-                  src="https://www.google.com/s2/favicons?domain={entry.domain}&sz=16"
-                  alt="" class="w-3.5 h-3.5 rounded-sm"
-                  onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
-                />
+                <img src="https://www.google.com/s2/favicons?domain={entry.domain}&sz=16" alt="" class="w-3.5 h-3.5 rounded-sm"
+                  onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }} />
                 <span class="hidden font-brand text-[10px] font-bold text-accent">{entryInitial(entry)}</span>
               {:else if entry.content_type === 'pdf'}
                 <svg class="w-3.5 h-3.5 text-red-400 dark:text-red-500/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -114,30 +105,39 @@
             </div>
 
             <div class="flex-1 min-w-0">
+              <!-- Meta row: type + domain (clickable) -->
               <div class="flex items-center gap-1.5 mb-[3px]">
                 <span class="font-brand text-[9px] font-semibold uppercase tracking-wider
                   {entry.content_type === 'pdf' ? 'text-red-400 dark:text-red-500/70' : 'text-accent/70'}">
                   {entry.content_type === 'pdf' ? 'PDF' : 'WEB'}
                 </span>
                 {#if entry.domain}
-                  <span class="text-[10px] text-text-tertiary truncate">{entry.domain}</span>
+                  <FilterChip label={entry.domain} variant="domain" onclick={() => onDomainClick(entry.domain!)} />
                 {/if}
               </div>
 
+              <!-- Title -->
               <h3 class="text-[13px] font-semibold text-text-primary truncate leading-snug">{entry.title}</h3>
 
+              <!-- Tags — clickable (NEW: search results now show tags) -->
+              {#if entry.tags.length > 0}
+                <div class="flex items-center gap-1 mt-1 flex-wrap">
+                  {#each entry.tags.slice(0, 4) as tag}
+                    <FilterChip label={tag} variant="tag" onclick={() => onTagClick(tag)} />
+                  {/each}
+                </div>
+              {/if}
+
+              <!-- Search snippet -->
               {#if hasSnippet(entry) && entry.snippet}
                 <p class="text-[11px] text-text-secondary mt-1 line-clamp-2 leading-relaxed">{@html entry.snippet}</p>
               {/if}
 
+              <!-- Footer -->
               <div class="flex items-center gap-2.5 mt-1.5 font-brand text-[10px] text-text-tertiary">
                 <span>{formatDate(entry.created_at)}</span>
-                {#if entry.word_count}
-                  <span>{entry.word_count.toLocaleString()}w</span>
-                {/if}
-                {#if entry.page_count}
-                  <span>{entry.page_count}pg</span>
-                {/if}
+                {#if entry.word_count}<span>{entry.word_count.toLocaleString()}w</span>{/if}
+                {#if entry.page_count}<span>{entry.page_count}pg</span>{/if}
                 {#if 'matched_page' in entry && entry.matched_page}
                   <span class="text-accent font-semibold">p.{entry.matched_page}</span>
                 {/if}

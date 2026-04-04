@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, decodeBase64, formatDate, type Entry, type EntryContent, type SimilarEntry, type Keyword } from '../api';
+  import FilterChip from './FilterChip.svelte';
   import PdfView from './PdfView.svelte';
 
   interface Props {
@@ -9,8 +10,11 @@
     onTagsChange: (id: string, tags: string[]) => void;
     onDelete: (id: string) => void;
     onNavigate?: (entry: Entry) => void;
+    onTagClick?: (tag: string) => void;
+    onDomainClick?: (domain: string) => void;
+    onKeywordClick?: (keyword: string) => void;
   }
-  let { entry, initialPage, onBack, onTagsChange, onDelete, onNavigate }: Props = $props();
+  let { entry, initialPage, onBack, onTagsChange, onDelete, onNavigate, onTagClick, onDomainClick, onKeywordClick }: Props = $props();
 
   let content = $state<EntryContent | null>(null);
   let viewMode = $state<'archive' | 'reader'>('archive');
@@ -95,10 +99,7 @@
 <div class="flex-1 flex flex-col min-h-0 bg-surface">
   <!-- Toolbar -->
   <div class="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
-    <button
-      class="text-[13px] text-text-secondary hover:text-accent flex items-center gap-1 transition-colors"
-      onclick={onBack}
-    >
+    <button class="text-[13px] text-text-secondary hover:text-accent flex items-center gap-1 transition-colors" onclick={onBack}>
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path d="M15 19l-7-7 7-7" />
       </svg>
@@ -110,64 +111,50 @@
     {#if entry.content_type === 'article' && content?.snapshot_html}
       <div class="flex rounded-md border border-border text-[11px] overflow-hidden">
         <button
-          class="px-2.5 py-1 transition-colors
-            {viewMode === 'archive' ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-raised'}"
+          class="px-2.5 py-1 transition-colors {viewMode === 'archive' ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-raised'}"
           onclick={() => viewMode = 'archive'}
         >Archive</button>
         <button
-          class="px-2.5 py-1 border-l border-border transition-colors
-            {viewMode === 'reader' ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-raised'}"
+          class="px-2.5 py-1 border-l border-border transition-colors {viewMode === 'reader' ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-raised'}"
           onclick={() => viewMode = 'reader'}
         >Reader</button>
       </div>
     {/if}
 
     {#if entry.url}
-      <a
-        href={entry.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        class="text-[11px] px-2.5 py-1 rounded-md border border-border text-text-secondary hover:bg-surface-raised transition-colors"
-      >Original</a>
+      <a href={entry.url} target="_blank" rel="noopener noreferrer"
+        class="text-[11px] px-2.5 py-1 rounded-md border border-border text-text-secondary hover:bg-surface-raised transition-colors">
+        Original
+      </a>
     {/if}
 
     <button
       class="text-[11px] px-2.5 py-1 rounded-md border transition-all duration-200
-        {confirmingDelete
-          ? 'border-red-400 bg-red-500 text-white hover:bg-red-600'
-          : 'border-border text-text-tertiary hover:text-red-500 hover:border-red-300 dark:hover:border-red-800'}"
+        {confirmingDelete ? 'border-red-400 bg-red-500 text-white hover:bg-red-600' : 'border-border text-text-tertiary hover:text-red-500 hover:border-red-300 dark:hover:border-red-800'}"
       onclick={handleDelete}
-    >
-      {confirmingDelete ? 'Confirm?' : 'Delete'}
-    </button>
+    >{confirmingDelete ? 'Confirm?' : 'Delete'}</button>
   </div>
 
   <!-- Entry header -->
   <div class="px-6 py-4 border-b border-border-subtle bg-surface-sunken shrink-0">
     <h1 class="text-[16px] font-semibold text-text-primary leading-tight">{entry.title}</h1>
+
+    <!-- Metadata row: domain (clickable), date, counts -->
     <div class="flex items-center gap-3 mt-2 font-brand text-[11px] text-text-tertiary">
       {#if entry.domain}
-        <span class="flex items-center gap-1.5">
-          <img
-            src="https://www.google.com/s2/favicons?domain={entry.domain}&sz=16"
-            alt=""
-            class="w-3 h-3 rounded-sm"
-            onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-          />
-          {entry.domain}
-        </span>
+        <FilterChip label={entry.domain} variant="domain" onclick={() => onDomainClick?.(entry.domain!)} />
       {/if}
       <span>{formatDate(entry.created_at)}</span>
       {#if entry.word_count}<span>{entry.word_count.toLocaleString()}w</span>{/if}
       {#if entry.page_count}<span>{entry.page_count}pg</span>{/if}
     </div>
 
-    <!-- Tags -->
+    <!-- Tags — clickable to filter, with add/remove -->
     <div class="flex items-center gap-1.5 mt-2.5 flex-wrap">
       {#each entry.tags as tag}
-        <span class="inline-flex items-center gap-1 text-[11px] px-2 py-[2px] rounded-md bg-accent-soft text-accent font-medium">
-          #{tag}
-          <button class="opacity-50 hover:opacity-100 transition-opacity" onclick={() => removeTag(tag)}>&times;</button>
+        <span class="inline-flex items-center gap-0.5">
+          <FilterChip label={tag} variant="tag" onclick={() => onTagClick?.(tag)} />
+          <button class="text-accent/40 hover:text-accent text-[10px] transition-opacity" onclick={() => removeTag(tag)}>&times;</button>
         </span>
       {/each}
       <input
@@ -179,11 +166,11 @@
       />
     </div>
 
-    <!-- Auto-extracted keywords -->
+    <!-- Keywords — clickable to search -->
     {#if entryKeywords.length > 0}
       <div class="flex items-center gap-1.5 mt-2 flex-wrap">
-        {#each entryKeywords.slice(0, 5) as kw}
-          <span class="text-[10px] px-1.5 py-[1px] rounded bg-surface-sunken text-text-tertiary">{kw.keyword}</span>
+        {#each entryKeywords.slice(0, 6) as kw}
+          <FilterChip label={kw.keyword} variant="keyword" onclick={() => onKeywordClick?.(kw.keyword)} />
         {/each}
       </div>
     {/if}
@@ -217,10 +204,8 @@
     {:else if loadError}
       <div class="flex flex-col items-center justify-center h-full gap-3">
         <p class="text-[13px] text-red-500">{loadError}</p>
-        <button
-          class="px-3 py-1.5 rounded-md bg-surface-raised border border-border text-text-secondary hover:bg-surface-sunken text-[11px] transition-colors"
-          onclick={() => loadContent(entry.id)}
-        >Retry</button>
+        <button class="px-3 py-1.5 rounded-md bg-surface-raised border border-border text-text-secondary hover:bg-surface-sunken text-[11px] transition-colors"
+          onclick={() => loadContent(entry.id)}>Retry</button>
       </div>
     {:else if entry.content_type === 'pdf' && content?.pdf_base64}
       <PdfView data={content.pdf_base64} {initialPage} />
@@ -239,9 +224,7 @@
         </div>
       </div>
     {:else}
-      <div class="flex items-center justify-center h-full text-text-tertiary text-[13px]">
-        No content available
-      </div>
+      <div class="flex items-center justify-center h-full text-text-tertiary text-[13px]">No content available</div>
     {/if}
   </div>
 </div>
