@@ -178,7 +178,35 @@
         class="text-[11px] px-1.5 py-[2px] w-14 bg-transparent border-b border-transparent focus:border-accent/30 outline-none text-text-secondary placeholder-text-tertiary"
       />
     </div>
+
+    <!-- Auto-extracted keywords -->
+    {#if entryKeywords.length > 0}
+      <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+        {#each entryKeywords.slice(0, 5) as kw}
+          <span class="text-[10px] px-1.5 py-[1px] rounded bg-surface-sunken text-text-tertiary">{kw.keyword}</span>
+        {/each}
+      </div>
+    {/if}
   </div>
+
+  <!-- Related entries -->
+  {#if similarEntries.length > 0}
+    <div class="px-6 py-2.5 border-b border-border-subtle bg-surface shrink-0">
+      <h3 class="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-tertiary mb-2">Related</h3>
+      <div class="flex gap-2 overflow-x-auto scroll-x-hidden pb-1">
+        {#each similarEntries as sim}
+          <button
+            class="shrink-0 px-2.5 py-1.5 rounded-md bg-surface-raised border border-border-subtle text-left
+              hover:border-accent/30 transition-all text-[11px] max-w-[200px]"
+            onclick={() => onNavigate?.(sim)}
+          >
+            <p class="font-medium text-text-primary truncate">{sim.title}</p>
+            <span class="font-brand text-[9px] text-text-tertiary">{Math.round(sim.similarity * 100)}% match</span>
+          </button>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <!-- Content -->
   <div class="flex-1 min-h-0 overflow-hidden">

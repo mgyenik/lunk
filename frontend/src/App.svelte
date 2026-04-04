@@ -228,6 +228,7 @@
           onBack={handleBack}
           onTagsChange={handleTagsChange}
           onDelete={handleDelete}
+          onNavigate={(e) => handleSelect(e)}
         />
       </div>
     {:else if currentView === 'search'}
