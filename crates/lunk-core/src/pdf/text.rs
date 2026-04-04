@@ -507,8 +507,8 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Uses local file — not hermetic. Run with --ignored.
     fn test_extract_real_pdf() {
-        // Test with the MP6002 PDF
         let path = std::path::Path::new("/home/m/Downloads/MP6002.pdf");
         if !path.exists() {
             return;
@@ -529,6 +529,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Uses local file — not hermetic. Run with --ignored.
     fn test_extract_broken_trailer_pdf() {
         let path = std::path::Path::new(
             "/home/m/Downloads/Second_Order_Digital_Filters_Done_Right.pdf",
@@ -543,6 +544,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Uses local file — not hermetic. Run with --ignored.
     fn test_scanned_pdf_returns_empty() {
         let path =
             std::path::Path::new("/home/m/Downloads/making-digital-filters-sound-analog.pdf");

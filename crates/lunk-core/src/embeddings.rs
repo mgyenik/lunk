@@ -270,8 +270,8 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Downloads model on first run — not hermetic. Run with --ignored.
     fn test_model_loads() {
-        // This test requires the model to be available (downloads on first run)
         let model = EmbeddingModel::new(None);
         if model.is_err() {
             eprintln!("Skipping: model not available");
