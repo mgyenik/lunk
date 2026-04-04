@@ -214,6 +214,7 @@ async fn create_entry(
         }
 
         let entry = with_db_mut(&state.db, |db| repo::create_pdf_entry(db, req, pages))?;
+        embed_and_extract_keywords(&state, &entry);
         return Ok((StatusCode::CREATED, Json(entry)));
     }
 
@@ -227,7 +228,21 @@ async fn create_entry(
     }
 
     let entry = with_db_mut(&state.db, |db| repo::create_entry(db, req))?;
+    embed_and_extract_keywords(&state, &entry);
     Ok((StatusCode::CREATED, Json(entry)))
+}
+
+/// Generate embedding and extract keywords for a newly created entry.
+fn embed_and_extract_keywords(state: &AppState, entry: &Entry) {
+    use lunk_core::{embeddings, keywords};
+    let entry_id = entry.id;
+    if let Err(e) = with_db(&state.db, |conn| {
+        embeddings::embed_entry(conn, &state.embedding_model, &entry_id)?;
+        keywords::extract_and_store(conn, &entry_id)?;
+        Ok(())
+    }) {
+        tracing::warn!(%entry_id, "post-save semantic processing failed: {e}");
+    }
 }
 
 async fn list_entries(

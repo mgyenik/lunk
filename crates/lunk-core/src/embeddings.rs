@@ -4,6 +4,8 @@
 //! for document text. Embeddings are stored as BLOBs in SQLite and used
 //! for similarity search and topic clustering.
 
+use std::sync::Arc;
+
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
@@ -23,9 +25,11 @@ pub const MODEL_VERSION: &str = "all-MiniLM-L6-v2-q";
 const MAX_TEXT_LEN: usize = 1500;
 
 /// Wrapper around fastembed's TextEmbedding model.
-/// Initialized once at app startup, shared across requests.
+/// Initialized once at app startup, shared across the Tauri app and HTTP server.
+/// Clone is cheap (Arc).
+#[derive(Clone)]
 pub struct EmbeddingModel {
-    inner: fastembed::TextEmbedding,
+    inner: Arc<fastembed::TextEmbedding>,
 }
 
 impl EmbeddingModel {
@@ -44,7 +48,7 @@ impl EmbeddingModel {
         let inner = fastembed::TextEmbedding::try_new(opts)
             .map_err(|e| LunkError::Other(format!("embedding model init: {e}")))?;
 
-        Ok(Self { inner })
+        Ok(Self { inner: Arc::new(inner) })
     }
 
     /// Generate an embedding for a text string.

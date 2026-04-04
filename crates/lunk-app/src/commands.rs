@@ -163,6 +163,7 @@ pub fn get_tags(
 #[tauri::command]
 pub fn import_pdf(
     db: tauri::State<'_, DbPool>,
+    model: tauri::State<'_, embeddings::EmbeddingModel>,
     path: String,
 ) -> Result<Entry, String> {
     let file_path = std::path::Path::new(&path);
@@ -194,8 +195,21 @@ pub fn import_pdf(
         source: SaveSource::Api,
     };
 
-    with_db_mut(&db, |db| repo::create_pdf_entry(db, req, pages))
-        .map_err(|e| e.to_string())
+    let entry = with_db_mut(&db, |db| repo::create_pdf_entry(db, req, pages))
+        .map_err(|e| e.to_string())?;
+
+    // Generate embedding + keywords for the new entry
+    let entry_id = entry.id;
+    let model = model.inner();
+    if let Err(e) = with_db(&db, |conn| {
+        embeddings::embed_entry(conn, model, &entry_id)?;
+        keywords::extract_and_store(conn, &entry_id)?;
+        Ok(())
+    }) {
+        tracing::warn!(%entry_id, "post-save semantic processing failed: {e}");
+    }
+
+    Ok(entry)
 }
 
 // --- Sync commands ---

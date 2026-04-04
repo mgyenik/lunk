@@ -42,9 +42,12 @@ pub fn run() {
     // Shared cell for the sync node (filled asynchronously after startup)
     let sync_cell: SyncNodeCell = Arc::new(OnceCell::new());
 
-    // Initialize embedding model (bundled with the app)
+    // Initialize embedding model (bundled with the app, shared via Arc)
     let embedding_model = lunk_core::embeddings::EmbeddingModel::new(None)
         .expect("failed to load embedding model");
+    let server_model = embedding_model.clone();
+    let backfill_model = embedding_model.clone();
+    let backfill_pool = pool.clone();
     tracing::info!("embedding model loaded");
 
     tauri::Builder::default()
@@ -139,6 +142,7 @@ pub fn run() {
                 // Start HTTP API server
                 let state = AppState {
                     db: server_pool,
+                    embedding_model: server_model,
                     sync_node: sync_node.clone(),
                 };
                 let router = lunk_server::build_router(state);
@@ -150,6 +154,23 @@ pub fn run() {
                     axum::serve(listener, router)
                         .await
                         .expect("HTTP server error");
+                });
+
+                // Background: backfill embeddings + keywords for existing entries
+                tokio::spawn(async move {
+                    use lunk_core::db::with_db;
+                    match with_db(&backfill_pool, |conn| {
+                        let emb = lunk_core::embeddings::embed_all_missing(conn, &backfill_model)?;
+                        let kw = lunk_core::keywords::extract_all_missing(conn)?;
+                        Ok((emb, kw))
+                    }) {
+                        Ok((emb, kw)) => {
+                            if emb > 0 || kw > 0 {
+                                tracing::info!("backfill: {emb} embeddings, {kw} keyword extractions");
+                            }
+                        }
+                        Err(e) => tracing::warn!("backfill failed: {e}"),
+                    }
                 });
 
                 // Background periodic sync
