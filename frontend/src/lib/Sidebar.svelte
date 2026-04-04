@@ -1,17 +1,25 @@
 <script lang="ts">
+  import { api, type TagWithCount } from '../api';
+
   interface Props {
-    currentView: 'all' | 'read-later' | 'search' | 'sync';
-    onNavigate: (view: 'all' | 'read-later' | 'sync') => void;
+    currentView: 'all' | 'search' | 'sync';
+    activeTag: string | null;
+    tagsRefreshKey: number;
+    onNavigate: (view: 'all' | 'sync') => void;
+    onTagSelect: (tag: string | null) => void;
     onImportPdf: () => void;
   }
-  let { currentView, onNavigate, onImportPdf }: Props = $props();
+  let { currentView, activeTag, tagsRefreshKey, onNavigate, onTagSelect, onImportPdf }: Props = $props();
 
   let isDark = $state(document.documentElement.classList.contains('dark'));
+  let tags = $state<TagWithCount[]>([]);
+  let tagsExpanded = $state(true);
 
-  const navItems = [
-    { id: 'all' as const, label: 'All Entries', icon: '&#9733;' },
-    { id: 'read-later' as const, label: 'Read Later', icon: '&#9776;' },
-  ];
+  // Fetch tags on mount and when refresh key changes
+  $effect(() => {
+    tagsRefreshKey; // track dependency
+    api.getTags().then(t => { tags = t; });
+  });
 
   function toggleDark() {
     isDark = !isDark;
@@ -20,31 +28,78 @@
   }
 </script>
 
-<aside class="w-56 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col h-full shrink-0">
-  <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-    <h1 class="text-lg font-bold tracking-wider text-gray-900 dark:text-gray-100">LUNK</h1>
-    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Personal Archive</p>
+<aside class="w-56 bg-gray-50 dark:bg-gray-800/50 border-r border-gray-200 dark:border-gray-700/50 flex flex-col h-full shrink-0">
+  <!-- Header -->
+  <div class="px-4 py-4 border-b border-gray-200 dark:border-gray-700/50">
+    <div class="flex items-center gap-2">
+      <svg class="w-5 h-5 text-accent shrink-0" viewBox="0 0 48 46" fill="currentColor">
+        <path d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
+      </svg>
+      <div>
+        <h1 class="text-xl font-bold tracking-wider text-gray-900 dark:text-gray-100">LUNK</h1>
+        <p class="text-[10px] text-gray-400 dark:text-gray-500 -mt-0.5 tracking-wide">Personal Archive</p>
+      </div>
+    </div>
   </div>
 
-  <nav class="flex-1 p-2">
-    {#each navItems as item}
-      <button
-        class="w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 mb-0.5 transition-colors
-          {currentView === item.id
-            ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-medium'
-            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-200'}"
-        onclick={() => onNavigate(item.id)}
-      >
-        <span class="text-base opacity-60">{@html item.icon}</span>
-        {item.label}
-      </button>
-    {/each}
+  <!-- Navigation -->
+  <nav class="flex-1 overflow-y-auto p-2">
+    <!-- All Entries -->
+    <button
+      class="w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 mb-1 transition-colors
+        {currentView === 'all' && activeTag === null
+          ? 'bg-accent-soft text-accent font-medium'
+          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-200'}"
+      onclick={() => onNavigate('all')}
+    >
+      <svg class="w-4 h-4 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+      </svg>
+      All Entries
+    </button>
+
+    <!-- Tags section -->
+    {#if tags.length > 0}
+      <div class="mt-3">
+        <button
+          class="w-full text-left px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500 flex items-center gap-1.5 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+          onclick={() => tagsExpanded = !tagsExpanded}
+        >
+          <svg class="w-3 h-3 transition-transform {tagsExpanded ? 'rotate-90' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path d="M9 5l7 7-7 7" />
+          </svg>
+          Tags
+          <span class="ml-auto text-[10px] font-normal opacity-60">{tags.length}</span>
+        </button>
+
+        {#if tagsExpanded}
+          <div class="mt-0.5 space-y-0.5 max-h-[50vh] overflow-y-auto">
+            {#each tags as tag}
+              <button
+                class="w-full text-left px-3 py-1.5 rounded-md text-xs flex items-center justify-between transition-colors
+                  {activeTag === tag.name
+                    ? 'bg-accent-soft text-accent font-medium'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 hover:text-gray-700 dark:hover:text-gray-300'}"
+                onclick={() => onTagSelect(activeTag === tag.name ? null : tag.name)}
+              >
+                <span class="truncate">{tag.name}</span>
+                <span class="shrink-0 text-[10px] tabular-nums px-1.5 rounded-full
+                  {activeTag === tag.name
+                    ? 'bg-accent/10 text-accent'
+                    : 'bg-gray-200/60 dark:bg-gray-600/40 text-gray-400 dark:text-gray-500'}"
+                >{tag.count}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
   </nav>
 
   <!-- Import PDF -->
-  <div class="p-3 border-t border-gray-200 dark:border-gray-700">
+  <div class="p-3 border-t border-gray-200 dark:border-gray-700/50">
     <button
-      class="w-full text-sm px-3 py-2 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-2 justify-center"
+      class="w-full text-sm px-3 py-2 rounded-md border border-accent/20 text-accent hover:bg-accent-soft transition-colors flex items-center gap-2 justify-center font-medium"
       onclick={onImportPdf}
     >
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -55,12 +110,12 @@
   </div>
 
   <!-- Sync -->
-  <div class="p-2 border-t border-gray-200 dark:border-gray-700">
+  <div class="px-2 pb-1 border-t border-gray-200 dark:border-gray-700/50 pt-1">
     <button
       class="w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 transition-colors
         {currentView === 'sync'
-          ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-medium'
-          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-200'}"
+          ? 'bg-accent-soft text-accent font-medium'
+          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 hover:text-gray-700 dark:hover:text-gray-300'}"
       onclick={() => onNavigate('sync')}
     >
       <svg class="w-4 h-4 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -70,15 +125,15 @@
     </button>
   </div>
 
-  <!-- Footer: dark mode toggle + version -->
-  <div class="p-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
-    <span class="text-xs text-gray-400 dark:text-gray-500">v0.2.0</span>
+  <!-- Footer -->
+  <div class="p-3 border-t border-gray-200 dark:border-gray-700/50 flex items-center justify-between">
+    <span class="text-[10px] text-gray-400 dark:text-gray-500">v0.2.0</span>
     <button
-      class="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+      class="text-[10px] px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
       onclick={toggleDark}
       title="Toggle dark mode"
     >
-      {isDark ? 'Light' : 'Dark'}
+      {isDark ? '☀ Light' : '☾ Dark'}
     </button>
   </div>
 </aside>

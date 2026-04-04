@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fade, fly } from 'svelte/transition';
   import Sidebar from './lib/Sidebar.svelte';
   import SearchBar from './lib/SearchBar.svelte';
   import EntryList from './lib/EntryList.svelte';
@@ -8,7 +9,7 @@
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { open } from '@tauri-apps/plugin-dialog';
 
-  let currentView = $state<'all' | 'read-later' | 'search' | 'sync'>('all');
+  let currentView = $state<'all' | 'search' | 'sync'>('all');
   let entries = $state<(Entry | SearchHit)[]>([]);
   let totalCount = $state(0);
   let selectedEntry = $state<Entry | null>(null);
@@ -17,6 +18,11 @@
   let isLoading = $state(false);
   let isDragOver = $state(false);
 
+  // Filtering
+  let activeTag = $state<string | null>(null);
+  let contentTypeFilter = $state<'all' | 'article' | 'pdf'>('all');
+  let tagsRefreshKey = $state(0);
+
   async function loadEntries() {
     isLoading = true;
     try {
@@ -24,12 +30,12 @@
         const result = await api.search(searchQuery, 100);
         entries = result.entries;
         totalCount = result.total;
-      } else if (currentView === 'read-later') {
-        const result = await api.listEntries({ tag: 'read-later', limit: 100 });
-        entries = result.entries;
-        totalCount = result.total;
       } else {
-        const result = await api.listEntries({ limit: 100 });
+        const result = await api.listEntries({
+          tag: activeTag ?? undefined,
+          contentType: contentTypeFilter === 'all' ? undefined : contentTypeFilter,
+          limit: 100,
+        });
         entries = result.entries;
         totalCount = result.total;
       }
@@ -40,13 +46,24 @@
     }
   }
 
-  function handleNavigate(view: 'all' | 'read-later' | 'sync') {
+  // Reload when filters change
+  $effect(() => {
+    // Track dependencies
+    activeTag;
+    contentTypeFilter;
+    if (currentView !== 'sync' && currentView !== 'search') {
+      loadEntries();
+    }
+  });
+
+  function handleNavigate(view: 'all' | 'sync') {
     currentView = view;
     selectedEntry = null;
     selectedMatchedPage = undefined;
     searchQuery = '';
-    if (view !== 'sync') {
-      loadEntries();
+    if (view === 'all') {
+      activeTag = null;
+      contentTypeFilter = 'all';
     }
   }
 
@@ -62,6 +79,18 @@
     loadEntries();
   }
 
+  function handleTagSelect(tag: string | null) {
+    activeTag = tag;
+    currentView = 'all';
+    selectedEntry = null;
+    selectedMatchedPage = undefined;
+    searchQuery = '';
+  }
+
+  function handleContentTypeFilter(type: 'all' | 'article' | 'pdf') {
+    contentTypeFilter = type;
+  }
+
   function handleSelect(entry: Entry, matchedPage?: number) {
     selectedEntry = entry;
     selectedMatchedPage = matchedPage;
@@ -73,6 +102,7 @@
       if (selectedEntry?.id === id) {
         selectedEntry = updated;
       }
+      tagsRefreshKey++;
       loadEntries();
     } catch (err) {
       console.error('Failed to update tags:', err);
@@ -86,6 +116,7 @@
         selectedEntry = null;
         selectedMatchedPage = undefined;
       }
+      tagsRefreshKey++;
       loadEntries();
     } catch (err) {
       console.error('Failed to delete:', err);
@@ -105,6 +136,7 @@
     if (path) {
       try {
         await api.importPdf(path as string);
+        tagsRefreshKey++;
         loadEntries();
       } catch (err) {
         console.error('Failed to import PDF:', err);
@@ -128,7 +160,7 @@
         for (const path of paths) {
           if (path.toLowerCase().endsWith('.pdf')) {
             api.importPdf(path)
-              .then(() => loadEntries())
+              .then(() => { tagsRefreshKey++; loadEntries(); })
               .catch(err => console.error('Drop import failed:', err));
           }
         }
@@ -137,14 +169,12 @@
 
     return () => { unlisten?.(); };
   });
-
-  loadEntries();
 </script>
 
 <div class="flex h-full bg-white dark:bg-gray-900 relative">
   {#if isDragOver}
-    <div class="absolute inset-0 z-50 bg-blue-500/10 dark:bg-blue-500/20 border-2 border-dashed border-blue-400 rounded-lg flex items-center justify-center pointer-events-none">
-      <div class="bg-white/90 dark:bg-gray-800/90 px-6 py-4 rounded-lg shadow-lg text-blue-600 dark:text-blue-400 text-lg font-medium">
+    <div class="absolute inset-0 z-50 bg-accent/10 border-2 border-dashed border-accent rounded-lg flex items-center justify-center pointer-events-none">
+      <div class="bg-white/90 dark:bg-gray-800/90 px-6 py-4 rounded-lg shadow-lg text-accent text-lg font-medium">
         Drop PDF to import
       </div>
     </div>
@@ -152,7 +182,10 @@
 
   <Sidebar
     {currentView}
+    {activeTag}
+    {tagsRefreshKey}
     onNavigate={handleNavigate}
+    onTagSelect={handleTagSelect}
     onImportPdf={handleImportPdf}
   />
 
@@ -166,23 +199,30 @@
       />
 
       {#if selectedEntry}
-        <EntryView
-          entry={selectedEntry}
-          initialPage={selectedMatchedPage}
-          onBack={handleBack}
-          onTagsChange={handleTagsChange}
-          onDelete={handleDelete}
-        />
+        <div class="flex-1 min-h-0" in:fly={{ x: 20, duration: 150 }} out:fade={{ duration: 80 }}>
+          <EntryView
+            entry={selectedEntry}
+            initialPage={selectedMatchedPage}
+            onBack={handleBack}
+            onTagsChange={handleTagsChange}
+            onDelete={handleDelete}
+          />
+        </div>
       {:else}
-        <EntryList
-          {entries}
-          {totalCount}
-          {isLoading}
-          {currentView}
-          {searchQuery}
-          onSelect={handleSelect}
-          onTagsChange={handleTagsChange}
-        />
+        <div class="flex-1 min-h-0" in:fade={{ duration: 100 }}>
+          <EntryList
+            {entries}
+            {totalCount}
+            {isLoading}
+            {currentView}
+            {searchQuery}
+            {activeTag}
+            {contentTypeFilter}
+            onSelect={handleSelect}
+            onTagsChange={handleTagsChange}
+            onContentTypeFilter={handleContentTypeFilter}
+          />
+        </div>
       {/if}
     {/if}
   </div>

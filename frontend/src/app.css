@@ -2,8 +2,20 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Brand colors */
+@theme {
+  --color-accent: #863bff;
+  --color-accent-hover: #7e14ff;
+  --color-accent-soft: #ede6ff;
+  --color-accent-blue: #47bfff;
+}
+
 :root {
   --sidebar-width: 240px;
+}
+
+.dark {
+  --color-accent-soft: rgba(134, 59, 255, 0.12);
 }
 
 html, body, #app {
@@ -14,13 +26,13 @@ html, body, #app {
 }
 
 /* Scrollbar styling */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.25); }
 
-.dark ::-webkit-scrollbar-thumb { background: #4b5563; }
-.dark ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+.dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); }
+.dark ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
 
 /* Archive iframe styling */
 .archive-frame {
@@ -44,6 +56,6 @@ mark {
 
 /* Focus ring for keyboard navigation */
 .entry-focused {
-  outline: 2px solid #3b82f6;
-  outline-offset: -2px;
+  border-left: 2px solid var(--color-accent);
+  background: var(--color-accent-soft);
 }

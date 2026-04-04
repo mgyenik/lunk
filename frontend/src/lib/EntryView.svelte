@@ -77,15 +77,6 @@
     }
   }
 
-  function toggleReadLater() {
-    const has = entry.tags.includes('read-later');
-    const newTags = has
-      ? entry.tags.filter(t => t !== 'read-later')
-      : [...entry.tags, 'read-later'];
-    onTagsChange(entry.id, newTags);
-  }
-
-  // Keyboard: Escape to go back
   function handleKeydown(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     if (e.key === 'Escape') {
@@ -98,9 +89,9 @@
 
 <div class="flex-1 flex flex-col min-h-0">
   <!-- Toolbar -->
-  <div class="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shrink-0">
+  <div class="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700/50 bg-white dark:bg-gray-900 shrink-0">
     <button
-      class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 flex items-center gap-1"
+      class="text-sm text-gray-500 dark:text-gray-400 hover:text-accent flex items-center gap-1 transition-colors"
       onclick={onBack}
     >
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -116,14 +107,14 @@
       <div class="flex rounded-md border border-gray-200 dark:border-gray-600 text-xs">
         <button
           class="px-2.5 py-1 rounded-l-md transition-colors
-            {viewMode === 'archive' ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+            {viewMode === 'archive' ? 'bg-accent text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}"
           onclick={() => viewMode = 'archive'}
         >
           Archive
         </button>
         <button
           class="px-2.5 py-1 rounded-r-md transition-colors
-            {viewMode === 'reader' ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+            {viewMode === 'reader' ? 'bg-accent text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}"
           onclick={() => viewMode = 'reader'}
         >
           Reader
@@ -131,24 +122,13 @@
       </div>
     {/if}
 
-    <!-- Read later toggle -->
-    <button
-      class="text-xs px-2.5 py-1 rounded-md border transition-colors
-        {entry.tags.includes('read-later')
-          ? 'border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-          : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-      onclick={toggleReadLater}
-    >
-      {entry.tags.includes('read-later') ? 'Read later' : 'Read later'}
-    </button>
-
     <!-- Open original -->
     {#if entry.url}
       <a
         href={entry.url}
         target="_blank"
         rel="noopener noreferrer"
-        class="text-xs px-2.5 py-1 rounded-md border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+        class="text-xs px-2.5 py-1 rounded-md border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
       >
         Original
       </a>
@@ -159,19 +139,27 @@
       class="text-xs px-2.5 py-1 rounded-md border transition-colors
         {confirmingDelete
           ? 'border-red-400 bg-red-500 text-white hover:bg-red-600'
-          : 'border-red-200 dark:border-red-800 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30'}"
+          : 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-800'}"
       onclick={handleDelete}
     >
-      {confirmingDelete ? 'Confirm Delete?' : 'Delete'}
+      {confirmingDelete ? 'Confirm?' : 'Delete'}
     </button>
   </div>
 
   <!-- Entry header -->
-  <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 shrink-0">
+  <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800/50 bg-gray-50 dark:bg-gray-800/30 shrink-0">
     <h1 class="text-lg font-semibold text-gray-900 dark:text-gray-100 leading-tight">{entry.title}</h1>
     <div class="flex items-center gap-3 mt-2 text-xs text-gray-500 dark:text-gray-400">
       {#if entry.domain}
-        <span>{entry.domain}</span>
+        <span class="flex items-center gap-1.5">
+          <img
+            src="https://www.google.com/s2/favicons?domain={entry.domain}&sz=16"
+            alt=""
+            class="w-3.5 h-3.5 rounded-sm"
+            onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+          {entry.domain}
+        </span>
       {/if}
       <span>{formatDate(entry.created_at)}</span>
       {#if entry.word_count}
@@ -185,10 +173,10 @@
     <!-- Tags -->
     <div class="flex items-center gap-1.5 mt-2 flex-wrap">
       {#each entry.tags as tag}
-        <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+        <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-accent-soft text-accent">
           {tag}
           <button
-            class="hover:text-blue-800 dark:hover:text-blue-200"
+            class="hover:text-accent-hover"
             onclick={() => removeTag(tag)}
           >&times;</button>
         </span>
@@ -198,7 +186,7 @@
         bind:value={tagInput}
         onkeydown={handleTagKeydown}
         placeholder="+ tag"
-        class="text-xs px-2 py-0.5 w-16 bg-transparent border-b border-transparent focus:border-gray-300 dark:focus:border-gray-600 outline-none text-gray-500 dark:text-gray-400 placeholder-gray-400 dark:placeholder-gray-600"
+        class="text-xs px-2 py-0.5 w-16 bg-transparent border-b border-transparent focus:border-accent/30 outline-none text-gray-500 dark:text-gray-400 placeholder-gray-400 dark:placeholder-gray-600"
       />
     </div>
   </div>
