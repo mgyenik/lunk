@@ -318,4 +318,92 @@ mod tests {
         let embedding = model.embed_text("hello world").unwrap();
         assert_eq!(embedding.len(), EMBEDDING_DIM);
     }
+
+    // --- Pipeline integration tests (use mock embeddings, no model needed) ---
+
+    use crate::db;
+    use crate::models::{ContentType, CreateEntryRequest, SaveSource};
+    use crate::repo;
+
+    fn test_db() -> db::Db {
+        db::open_in_memory_db().unwrap()
+    }
+
+    fn create_test_entry(db: &mut db::Db, title: &str, text: &str) -> uuid::Uuid {
+        let req = CreateEntryRequest {
+            url: None,
+            title: title.to_string(),
+            content_type: ContentType::Article,
+            extracted_text: text.to_string(),
+            snapshot_html: None,
+            readable_html: None,
+            pdf_data: None,
+            tags: None,
+            source: SaveSource::Cli,
+        };
+        repo::create_entry(db, req).unwrap().id
+    }
+
+    /// Store a mock embedding (deterministic vector based on a seed).
+    fn store_mock_embedding(conn: &Connection, entry_id: &uuid::Uuid, seed: f32) {
+        let vec: Vec<f32> = (0..EMBEDDING_DIM).map(|i| (seed + i as f32 * 0.01).sin()).collect();
+        let blob = serialize_embedding(&vec);
+        conn.execute(
+            "INSERT INTO entry_embeddings (entry_id, embedding, model_version, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![entry_id.to_string(), blob, "test-mock", chrono::Utc::now().to_rfc3339()],
+        ).unwrap();
+    }
+
+    #[test]
+    fn test_store_and_load_embedding() {
+        let mut db = test_db();
+        let id = create_test_entry(&mut db, "Test", "Some text");
+        store_mock_embedding(db.conn(), &id, 1.0);
+
+        let all = load_all_embeddings(db.conn()).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].0, id.to_string());
+        assert_eq!(all[0].1.len(), EMBEDDING_DIM);
+    }
+
+    #[test]
+    fn test_find_similar_returns_ordered() {
+        let mut db = test_db();
+
+        // Create 3 entries with mock embeddings at known distances
+        let id_a = create_test_entry(&mut db, "Entry A", "Electronics text");
+        let id_b = create_test_entry(&mut db, "Entry B", "Similar electronics");
+        let id_c = create_test_entry(&mut db, "Entry C", "Completely different");
+
+        // A and B get similar embeddings (seeds 1.0, 1.1), C gets a different one (seed 50.0)
+        store_mock_embedding(db.conn(), &id_a, 1.0);
+        store_mock_embedding(db.conn(), &id_b, 1.1);
+        store_mock_embedding(db.conn(), &id_c, 50.0);
+
+        let similar = find_similar(db.conn(), &id_a, 5).unwrap();
+        assert_eq!(similar.len(), 2);
+        // B should be more similar to A than C is
+        assert_eq!(similar[0].0.id, id_b, "B should be most similar to A");
+        assert!(similar[0].1 > similar[1].1, "B's similarity should be higher than C's");
+    }
+
+    #[test]
+    fn test_find_similar_empty_db() {
+        let mut db = test_db();
+        let id = create_test_entry(&mut db, "Solo", "Only entry");
+        store_mock_embedding(db.conn(), &id, 1.0);
+
+        let similar = find_similar(db.conn(), &id, 5).unwrap();
+        assert!(similar.is_empty(), "no other entries to be similar to");
+    }
+
+    #[test]
+    fn test_find_similar_no_embedding() {
+        let mut db = test_db();
+        let id = create_test_entry(&mut db, "No Embedding", "text");
+        // Don't store an embedding
+        let result = find_similar(db.conn(), &id, 5);
+        assert!(result.is_err(), "should fail for entry without embedding");
+    }
 }

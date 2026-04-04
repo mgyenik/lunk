@@ -238,4 +238,102 @@ mod tests {
             assert!(pair[0].score <= pair[1].score);
         }
     }
+
+    // --- Database integration tests ---
+
+    use crate::db;
+    use crate::models::{ContentType, CreateEntryRequest, SaveSource};
+    use crate::repo;
+
+    #[test]
+    fn test_store_and_retrieve_keywords() {
+        let mut db = db::open_in_memory_db().unwrap();
+        let req = CreateEntryRequest {
+            url: None,
+            title: "Test".to_string(),
+            content_type: ContentType::Article,
+            extracted_text: "Some text".to_string(),
+            snapshot_html: None,
+            readable_html: None,
+            pdf_data: None,
+            tags: None,
+            source: SaveSource::Cli,
+        };
+        let entry = repo::create_entry(&mut db, req).unwrap();
+
+        let keywords = vec![
+            Keyword { keyword: "digital filters".into(), score: 0.05 },
+            Keyword { keyword: "audio processing".into(), score: 0.12 },
+        ];
+        store_keywords(db.conn(), &entry.id, &keywords).unwrap();
+
+        let retrieved = get_entry_keywords(db.conn(), &entry.id).unwrap();
+        assert_eq!(retrieved.len(), 2);
+        assert_eq!(retrieved[0].keyword, "digital filters"); // lowest score first
+        assert_eq!(retrieved[1].keyword, "audio processing");
+    }
+
+    #[test]
+    fn test_store_keywords_replaces() {
+        let mut db = db::open_in_memory_db().unwrap();
+        let req = CreateEntryRequest {
+            url: None,
+            title: "Test".to_string(),
+            content_type: ContentType::Article,
+            extracted_text: "Some text".to_string(),
+            snapshot_html: None,
+            readable_html: None,
+            pdf_data: None,
+            tags: None,
+            source: SaveSource::Cli,
+        };
+        let entry = repo::create_entry(&mut db, req).unwrap();
+
+        let kw1 = vec![Keyword { keyword: "old".into(), score: 0.1 }];
+        store_keywords(db.conn(), &entry.id, &kw1).unwrap();
+
+        let kw2 = vec![Keyword { keyword: "new".into(), score: 0.2 }];
+        store_keywords(db.conn(), &entry.id, &kw2).unwrap();
+
+        let retrieved = get_entry_keywords(db.conn(), &entry.id).unwrap();
+        assert_eq!(retrieved.len(), 1);
+        assert_eq!(retrieved[0].keyword, "new");
+    }
+
+    #[test]
+    fn test_top_keywords_for_entries() {
+        let mut db = db::open_in_memory_db().unwrap();
+
+        let mut ids = Vec::new();
+        for i in 0..3 {
+            let req = CreateEntryRequest {
+                url: None,
+                title: format!("Entry {i}"),
+                content_type: ContentType::Article,
+                extracted_text: "text".to_string(),
+                snapshot_html: None,
+                readable_html: None,
+                pdf_data: None,
+                tags: None,
+                source: SaveSource::Cli,
+            };
+            ids.push(repo::create_entry(&mut db, req).unwrap().id);
+        }
+
+        // All 3 share "common", only 1 has "rare"
+        for id in &ids {
+            store_keywords(db.conn(), id, &[
+                Keyword { keyword: "common".into(), score: 0.1 },
+            ]).unwrap();
+        }
+        store_keywords(db.conn(), &ids[0], &[
+            Keyword { keyword: "common".into(), score: 0.1 },
+            Keyword { keyword: "rare".into(), score: 0.2 },
+        ]).unwrap();
+
+        let id_strs: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+        let top = top_keywords_for_entries(db.conn(), &id_strs, 5).unwrap();
+        assert!(!top.is_empty());
+        assert_eq!(top[0], "common", "most common keyword should be first");
+    }
 }

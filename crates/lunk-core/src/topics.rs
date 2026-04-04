@@ -257,4 +257,72 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_compute_topics_with_mock_embeddings() {
+        use crate::db;
+        use crate::embeddings;
+        use crate::keywords::{self, Keyword};
+        use crate::models::{ContentType, CreateEntryRequest, SaveSource};
+        use crate::repo;
+
+        let mut db = db::open_in_memory_db().unwrap();
+
+        // Create 6 entries in 2 groups: electronics (3) and programming (3)
+        let electronics_texts = [
+            "Digital filter design for audio applications",
+            "IIR biquad implementation in embedded systems",
+            "Analog circuit analysis and impedance measurement",
+        ];
+        let programming_texts = [
+            "Rust async runtime and tokio executor patterns",
+            "WebAssembly compilation pipeline from Rust code",
+            "Memory safety and ownership in systems programming",
+        ];
+
+        let mut all_ids = Vec::new();
+        for (i, text) in electronics_texts.iter().chain(programming_texts.iter()).enumerate() {
+            let req = CreateEntryRequest {
+                url: None,
+                title: text.to_string(),
+                content_type: ContentType::Article,
+                extracted_text: text.to_string(),
+                snapshot_html: None,
+                readable_html: None,
+                pdf_data: None,
+                tags: None,
+                source: SaveSource::Cli,
+            };
+            let entry = repo::create_entry(&mut db, req).unwrap();
+
+            // Create embeddings that cluster: electronics entries are similar, programming entries are similar
+            let seed = if i < 3 { 1.0 + i as f32 * 0.1 } else { 50.0 + i as f32 * 0.1 };
+            let vec: Vec<f32> = (0..embeddings::EMBEDDING_DIM)
+                .map(|j| (seed + j as f32 * 0.01).sin())
+                .collect();
+            let blob = embeddings::serialize_embedding(&vec);
+            db.conn().execute(
+                "INSERT INTO entry_embeddings (entry_id, embedding, model_version, created_at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![entry.id.to_string(), blob, "test", chrono::Utc::now().to_rfc3339()],
+            ).unwrap();
+
+            // Add keywords for labeling
+            let kw = if i < 3 {
+                vec![Keyword { keyword: "electronics".into(), score: 0.1 }]
+            } else {
+                vec![Keyword { keyword: "programming".into(), score: 0.1 }]
+            };
+            keywords::store_keywords(db.conn(), &entry.id, &kw).unwrap();
+
+            all_ids.push(entry.id);
+        }
+
+        let topics = compute_topics(db.conn()).unwrap();
+        // Should find at least 1 cluster (likely 2)
+        assert!(!topics.is_empty(), "should find clusters from mock embeddings");
+
+        // Total clustered entries should be <= 6
+        let total_clustered: usize = topics.iter().map(|t| t.entry_count).sum();
+        assert!(total_clustered <= 6);
+    }
 }
