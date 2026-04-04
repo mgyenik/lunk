@@ -42,10 +42,24 @@ pub fn run() {
     // Shared cell for the sync node (filled asynchronously after startup)
     let sync_cell: SyncNodeCell = Arc::new(OnceCell::new());
 
+    // Initialize embedding model (for semantic features)
+    let embedding_model: Option<lunk_core::embeddings::EmbeddingModel> =
+        match lunk_core::embeddings::EmbeddingModel::new(None) {
+            Ok(m) => {
+                tracing::info!("embedding model loaded");
+                Some(m)
+            }
+            Err(e) => {
+                tracing::warn!("embedding model unavailable: {e} — semantic features disabled");
+                None
+            }
+        };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(pool)
+        .manage(embedding_model)
         .manage(sync_cell.clone())
         .invoke_handler(tauri::generate_handler![
             commands::search_entries,
@@ -65,6 +79,9 @@ pub fn run() {
             commands::get_topics,
             commands::get_topic_entries,
             commands::get_archive_stats,
+            commands::get_similar_entries,
+            commands::get_entry_keywords,
+            commands::trigger_backfill,
         ])
         .setup(move |app| {
             // System tray

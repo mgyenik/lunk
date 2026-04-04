@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use lunk_core::db::{with_db, with_db_mut, DbPool};
 use lunk_core::models::*;
-use lunk_core::{repo, search, sync, topics};
+use lunk_core::{embeddings, keywords, repo, search, sync, topics};
 
 use crate::SyncNodeCell;
 
@@ -311,4 +311,68 @@ pub fn get_archive_stats(
     db: tauri::State<'_, DbPool>,
 ) -> Result<topics::ArchiveStats, String> {
     with_db(&db, topics::get_archive_stats).map_err(|e| e.to_string())
+}
+
+// --- Semantic commands ---
+
+#[derive(Serialize)]
+pub struct SimilarEntryResponse {
+    #[serde(flatten)]
+    pub entry: Entry,
+    pub similarity: f32,
+}
+
+#[tauri::command]
+pub fn get_similar_entries(
+    db: tauri::State<'_, DbPool>,
+    id: String,
+    limit: Option<usize>,
+) -> Result<Vec<SimilarEntryResponse>, String> {
+    let uuid: uuid::Uuid = id.parse().map_err(|e| format!("bad id: {e}"))?;
+    let limit = limit.unwrap_or(5);
+
+    with_db(&db, |conn| {
+        let results = embeddings::find_similar(conn, &uuid, limit)?;
+        Ok(results
+            .into_iter()
+            .map(|(entry, similarity)| SimilarEntryResponse { entry, similarity })
+            .collect())
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_entry_keywords(
+    db: tauri::State<'_, DbPool>,
+    id: String,
+) -> Result<Vec<keywords::Keyword>, String> {
+    let uuid: uuid::Uuid = id.parse().map_err(|e| format!("bad id: {e}"))?;
+    with_db(&db, |conn| keywords::get_entry_keywords(conn, &uuid)).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct BackfillResult {
+    pub embeddings_created: usize,
+    pub keywords_extracted: usize,
+}
+
+#[tauri::command]
+pub fn trigger_backfill(
+    db: tauri::State<'_, DbPool>,
+    model: tauri::State<'_, Option<embeddings::EmbeddingModel>>,
+) -> Result<BackfillResult, String> {
+    let model = model
+        .inner()
+        .as_ref()
+        .ok_or("embedding model not initialized")?;
+
+    with_db(&db, |conn| {
+        let embeddings_created = embeddings::embed_all_missing(conn, model)?;
+        let keywords_extracted = keywords::extract_all_missing(conn)?;
+        Ok(BackfillResult {
+            embeddings_created,
+            keywords_extracted,
+        })
+    })
+    .map_err(|e| e.to_string())
 }
