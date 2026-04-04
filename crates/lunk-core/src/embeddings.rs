@@ -33,10 +33,10 @@ pub struct EmbeddingModel {
 }
 
 impl EmbeddingModel {
-    /// Initialize the embedding model.
+    /// Initialize the embedding model from a HuggingFace cache directory.
     ///
-    /// `cache_dir` is the directory containing the ONNX model files.
-    /// If None, uses fastembed's default cache (downloads on first use).
+    /// If `cache_dir` is None, uses fastembed's default cache (downloads on first use).
+    /// For production use, prefer `from_dir()` which loads from bundled resource files.
     pub fn new(cache_dir: Option<&std::path::Path>) -> Result<Self> {
         let mut opts =
             fastembed::InitOptions::new(fastembed::EmbeddingModel::AllMiniLML6V2Q);
@@ -47,6 +47,39 @@ impl EmbeddingModel {
 
         let inner = fastembed::TextEmbedding::try_new(opts)
             .map_err(|e| LunkError::Other(format!("embedding model init: {e}")))?;
+
+        Ok(Self { inner: Arc::new(inner) })
+    }
+
+    /// Initialize the embedding model from bundled resource files.
+    ///
+    /// `model_dir` should contain: model_quantized.onnx, tokenizer.json,
+    /// config.json, special_tokens_map.json, tokenizer_config.json.
+    /// These are downloaded at build time and bundled as Tauri resources.
+    pub fn from_dir(model_dir: &std::path::Path) -> Result<Self> {
+        let read = |name: &str| -> Result<Vec<u8>> {
+            std::fs::read(model_dir.join(name)).map_err(|e| {
+                LunkError::Other(format!("missing model file {name}: {e}"))
+            })
+        };
+
+        let user_model = fastembed::UserDefinedEmbeddingModel::new(
+            read("model_quantized.onnx")?,
+            fastembed::TokenizerFiles {
+                tokenizer_file: read("tokenizer.json")?,
+                config_file: read("config.json")?,
+                special_tokens_map_file: read("special_tokens_map.json")?,
+                tokenizer_config_file: read("tokenizer_config.json")?,
+            },
+        )
+        .with_pooling(fastembed::Pooling::Mean)
+        .with_quantization(fastembed::QuantizationMode::Dynamic);
+
+        let inner = fastembed::TextEmbedding::try_new_from_user_defined(
+            user_model,
+            fastembed::InitOptionsUserDefined::default(),
+        )
+        .map_err(|e| LunkError::Other(format!("embedding model init from dir: {e}")))?;
 
         Ok(Self { inner: Arc::new(inner) })
     }

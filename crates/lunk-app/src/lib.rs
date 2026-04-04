@@ -42,13 +42,45 @@ pub fn run() {
     // Shared cell for the sync node (filled asynchronously after startup)
     let sync_cell: SyncNodeCell = Arc::new(OnceCell::new());
 
-    // Initialize embedding model (bundled with the app, shared via Arc)
-    let embedding_model = lunk_core::embeddings::EmbeddingModel::new(None)
-        .expect("failed to load embedding model");
+    // Initialize embedding model from bundled resource files.
+    // The model is downloaded at build time (build.rs) and bundled via tauri.conf.json.
+    // In dev mode: files are at crates/lunk-app/models/all-MiniLM-L6-v2/
+    // In production: bundled in the app's resource directory.
+    let embedding_model = {
+        let exe_dir = std::env::current_exe()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()).ok_or(std::io::Error::other("no parent")))
+            .unwrap_or_default();
+
+        // Candidates for the model directory (production bundle + dev mode)
+        let candidates = [
+            exe_dir.join("models"),                              // Linux/Windows production
+            exe_dir.join("../Resources/models"),                 // macOS .app bundle
+            exe_dir.join("../lib/lunk-app/models"),              // Linux AppImage/deb
+            std::path::PathBuf::from("models/all-MiniLM-L6-v2"),// dev mode (cwd = crates/lunk-app)
+        ];
+
+        let model_dir = candidates.iter()
+            .find(|p| p.join("model_quantized.onnx").exists())
+            .cloned()
+            .unwrap_or_else(|| {
+                tracing::warn!("bundled model not found, falling back to download");
+                std::path::PathBuf::from(".fastembed_cache") // trigger download fallback
+            });
+
+        if model_dir.join("model_quantized.onnx").exists() {
+            tracing::info!("loading embedding model from {}", model_dir.display());
+            lunk_core::embeddings::EmbeddingModel::from_dir(&model_dir)
+                .expect("failed to load bundled embedding model")
+        } else {
+            tracing::info!("downloading embedding model (first run)");
+            lunk_core::embeddings::EmbeddingModel::new(None)
+                .expect("failed to load embedding model")
+        }
+    };
     let server_model = embedding_model.clone();
     let backfill_model = embedding_model.clone();
     let backfill_pool = pool.clone();
-    tracing::info!("embedding model loaded");
+    tracing::info!("embedding model ready");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())

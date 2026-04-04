@@ -153,13 +153,47 @@ The ONNX model file (~22MB) is downloaded at build time and bundled as a Tauri r
 
 ## Model Bundling
 
-The ONNX model is fetched during the build process:
+The ONNX model ships with the app binary — no runtime downloads.
 
-1. A `build.rs` script in `lunk-app` checks for the model in a local cache directory
-2. If missing, downloads from Hugging Face (`Xenova/all-MiniLM-L6-v2` ONNX export)
-3. The model path is registered in `tauri.conf.json` as a bundled resource
-4. At runtime, `fastembed` is configured with a custom cache path pointing to the bundled resource
-5. No first-run download, no network access needed
+### Build Time (`crates/lunk-app/build.rs`)
+
+The build script downloads 5 files from Hugging Face if not already cached locally:
+
+| File | Size | Purpose |
+|------|------|---------|
+| `model_quantized.onnx` | ~22MB | The ONNX neural network (INT8 quantized) |
+| `tokenizer.json` | ~695KB | Tokenizer vocabulary and rules |
+| `config.json` | ~650B | Model configuration (dimensions, etc.) |
+| `special_tokens_map.json` | ~125B | Special token definitions |
+| `tokenizer_config.json` | ~366B | Tokenizer settings |
+
+Files are downloaded to `crates/lunk-app/models/all-MiniLM-L6-v2/` and cached between builds. The `cargo:rerun-if-changed=models/` directive ensures the build script only runs when the directory changes.
+
+### Bundle Configuration (`tauri.conf.json`)
+
+```json
+"resources": { "models/all-MiniLM-L6-v2/*": "models/" }
+```
+
+This copies all model files into the Tauri app bundle's resource directory.
+
+### Runtime Loading (`lunk-app/src/lib.rs`)
+
+At startup, the app resolves the model directory from the executable path:
+- **Production**: relative to the binary (platform-specific: `models/`, `../Resources/models/`, `../lib/lunk-app/models/`)
+- **Dev mode**: `crates/lunk-app/models/all-MiniLM-L6-v2/` (build.rs output)
+- **Fallback**: if bundled files aren't found, downloads via fastembed's default cache (for dev/testing)
+
+The model is loaded via `EmbeddingModel::from_dir()` which uses fastembed's `UserDefinedEmbeddingModel` API — reads the 5 files as raw bytes and constructs the model in memory. This bypasses HuggingFace Hub's cache system entirely, avoiding symlink issues on Windows and read-only filesystem issues in app bundles.
+
+### Why `UserDefinedEmbeddingModel` instead of `cache_dir`
+
+fastembed's default `try_new()` uses HuggingFace Hub's cache format, which:
+- Uses symlinks (broken on Windows in some contexts)
+- May make network requests even with a populated cache (metadata checks)
+- Expects a writable cache directory (incompatible with read-only app bundles)
+
+`try_new_from_user_defined()` takes raw bytes directly — no filesystem layout requirements, no network access, no write permissions needed. This is the recommended approach for embedded/offline use.
 
 ## Future Possibilities
 

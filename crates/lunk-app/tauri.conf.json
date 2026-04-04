@@ -32,7 +32,10 @@
       "icons/128x128.png",
       "icons/icon.png",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "models/all-MiniLM-L6-v2/*": "models/"
+    }
   },
   "plugins": {
     "shell": {
