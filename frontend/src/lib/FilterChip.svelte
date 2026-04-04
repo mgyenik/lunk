@@ -78,7 +78,9 @@
     <span
       class="ml-0.5 opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
       role="button"
+      tabindex="0"
       onclick={handleRemove}
+      onkeydown={(e) => { if (e.key === 'Enter') handleRemove(e as any); }}
     >&times;</span>
   {/if}
 </button>

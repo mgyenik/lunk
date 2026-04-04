@@ -83,10 +83,11 @@
     {:else}
       <div class="card-grid">
         {#each entries as entry, i (entry.id)}
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div
             data-card-index={i}
             role="option"
+            tabindex="-1"
             aria-selected={focusedIndex === i}
             class="p-3 rounded-lg bg-surface-raised border transition-all cursor-pointer group
               {focusedIndex === i ? 'border-accent shadow-sm shadow-accent/10' : 'border-border-subtle hover:border-accent/30 hover:shadow-sm'}"
