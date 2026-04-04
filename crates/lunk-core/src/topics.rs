@@ -228,37 +228,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Uses real database — not hermetic. Run with --ignored.
-    fn test_compute_topics_with_real_data() {
-        let db_path = match crate::config::Config::db_path() {
-            Ok(p) if p.exists() => p,
-            _ => return,
-        };
-        let conn = rusqlite::Connection::open(&db_path).unwrap();
-        // Ensure schema is up to date (adds embedding tables if missing)
-        schema::run_migrations(&conn).unwrap();
-        let stats = get_archive_stats(&conn).unwrap();
-        if stats.total_entries < 4 {
-            return;
-        }
-
-        // This test needs embeddings to exist. If none, just verify it doesn't crash.
-        let topics = compute_topics(&conn).unwrap();
-        let summaries = get_topic_summaries(&conn, &topics).unwrap();
-        eprintln!(
-            "Found {} topics from {} entries:",
-            summaries.len(),
-            stats.total_entries
-        );
-        for s in &summaries {
-            eprintln!("  {} ({} entries)", s.label, s.entry_count);
-            for t in &s.sample_titles {
-                eprintln!("    - {t}");
-            }
-        }
-    }
-
-    #[test]
     fn test_compute_topics_with_mock_embeddings() {
         use crate::db;
         use crate::embeddings;

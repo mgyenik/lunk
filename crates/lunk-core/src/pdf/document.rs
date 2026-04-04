@@ -488,38 +488,6 @@ mod tests {
         assert!(dict_get(resources[0], b"Font").is_some());
     }
 
-    #[test]
-    #[ignore] // Uses local file — not hermetic. Run with --ignored.
-    fn test_load_real_pdf() {
-        let path = std::path::Path::new(
-            "/home/m/Downloads/Second_Order_Digital_Filters_Done_Right.pdf",
-        );
-        if !path.exists() {
-            return; // Skip if file not available
-        }
-        let data = std::fs::read(path).unwrap();
-        let doc = PdfDoc::load(&data);
-        assert!(doc.is_ok(), "should handle broken-trailer PDF");
-        let doc = doc.unwrap();
-        let pages = doc.pages();
-        assert_eq!(pages.len(), 10, "should find all 10 pages");
-    }
-
-    #[test]
-    #[ignore] // Uses local file — not hermetic. Run with --ignored.
-    fn test_load_form_xobject_pdf() {
-        let path = std::path::Path::new("/home/m/Downloads/MP6002.pdf");
-        if !path.exists() {
-            return;
-        }
-        let data = std::fs::read(path).unwrap();
-        let doc = PdfDoc::load(&data);
-        assert!(doc.is_ok());
-        let doc = doc.unwrap();
-        let pages = doc.pages();
-        assert_eq!(pages.len(), 15);
-    }
-
     // --- Error path tests ---
 
     #[test]
