@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, decodeBase64, formatDate, type Entry, type EntryContent } from '../api';
+  import { api, decodeBase64, formatDate, type Entry, type EntryContent, type SimilarEntry, type Keyword } from '../api';
   import PdfView from './PdfView.svelte';
 
   interface Props {
@@ -8,8 +8,9 @@
     onBack: () => void;
     onTagsChange: (id: string, tags: string[]) => void;
     onDelete: (id: string) => void;
+    onNavigate?: (entry: Entry) => void;
   }
-  let { entry, initialPage, onBack, onTagsChange, onDelete }: Props = $props();
+  let { entry, initialPage, onBack, onTagsChange, onDelete, onNavigate }: Props = $props();
 
   let content = $state<EntryContent | null>(null);
   let viewMode = $state<'archive' | 'reader'>('archive');
@@ -18,8 +19,13 @@
   let confirmingDelete = $state(false);
   let iframeEl: HTMLIFrameElement | undefined = $state();
   let tagInput = $state('');
+  let similarEntries = $state<SimilarEntry[]>([]);
+  let entryKeywords = $state<Keyword[]>([]);
 
-  $effect(() => { loadContent(entry.id); });
+  $effect(() => {
+    loadContent(entry.id);
+    loadSemantic(entry.id);
+  });
 
   async function loadContent(id: string) {
     isLoading = true;
@@ -41,6 +47,16 @@
       iframeEl.src = URL.createObjectURL(blob);
     }
   });
+
+  async function loadSemantic(id: string) {
+    // These may fail if the entry hasn't been embedded yet (pre-backfill)
+    const [similar, kw] = await Promise.all([
+      api.getSimilarEntries(id, 5).catch((): SimilarEntry[] => []),
+      api.getEntryKeywords(id).catch((): Keyword[] => []),
+    ]);
+    similarEntries = similar;
+    entryKeywords = kw;
+  }
 
   function handleDelete() {
     if (confirmingDelete) {

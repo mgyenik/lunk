@@ -92,6 +92,20 @@ export interface ArchiveStats {
   recent_count: number;
 }
 
+export interface SimilarEntry extends Entry {
+  similarity: number;
+}
+
+export interface Keyword {
+  keyword: string;
+  score: number;
+}
+
+export interface BackfillResult {
+  embeddings_created: number;
+  keywords_extracted: number;
+}
+
 export interface TagSuggestions {
   domain_tags: string[];
   similar_tags: string[];
@@ -171,6 +185,18 @@ export const api = {
 
   getArchiveStats(): Promise<ArchiveStats> {
     return invoke('get_archive_stats');
+  },
+
+  getSimilarEntries(id: string, limit = 5): Promise<SimilarEntry[]> {
+    return invoke('get_similar_entries', { id, limit });
+  },
+
+  getEntryKeywords(id: string): Promise<Keyword[]> {
+    return invoke('get_entry_keywords', { id });
+  },
+
+  triggerBackfill(): Promise<BackfillResult> {
+    return invoke('trigger_backfill');
   },
 };
 

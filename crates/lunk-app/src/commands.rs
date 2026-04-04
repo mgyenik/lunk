@@ -359,15 +359,10 @@ pub struct BackfillResult {
 #[tauri::command]
 pub fn trigger_backfill(
     db: tauri::State<'_, DbPool>,
-    model: tauri::State<'_, Option<embeddings::EmbeddingModel>>,
+    model: tauri::State<'_, embeddings::EmbeddingModel>,
 ) -> Result<BackfillResult, String> {
-    let model = model
-        .inner()
-        .as_ref()
-        .ok_or("embedding model not initialized")?;
-
     with_db(&db, |conn| {
-        let embeddings_created = embeddings::embed_all_missing(conn, model)?;
+        let embeddings_created = embeddings::embed_all_missing(conn, &model)?;
         let keywords_extracted = keywords::extract_all_missing(conn)?;
         Ok(BackfillResult {
             embeddings_created,
