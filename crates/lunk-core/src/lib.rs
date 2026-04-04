@@ -1,8 +1,10 @@
 pub mod change_tracking;
 pub mod config;
 pub mod db;
+pub mod embeddings;
 pub mod errors;
 pub mod hlc;
+pub mod keywords;
 pub mod models;
 pub mod pdf;
 pub mod repo;

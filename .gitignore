@@ -39,3 +39,4 @@ dist/
 *.so
 *.dylib
 *.dll
+.fastembed_cache/

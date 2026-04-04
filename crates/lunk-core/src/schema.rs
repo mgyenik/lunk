@@ -3,7 +3,7 @@ use rusqlite::{params, Connection};
 use crate::errors::Result;
 
 /// Current schema version. Bump this when adding a new migration.
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 /// A schema migration: version number, human description, and migration function.
 struct Migration {
@@ -44,6 +44,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 4,
         description: "Add fts5vocab virtual table for topic clustering",
         up: migrate_v4,
+    },
+    Migration {
+        version: 5,
+        description: "Add embedding and keyword storage for semantic features",
+        up: migrate_v5,
     },
 ];
 
@@ -461,6 +466,29 @@ fn migrate_v4(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE VIRTUAL TABLE IF NOT EXISTS entries_vocab
          USING fts5vocab('entries_fts', 'row');",
+    )?;
+    Ok(())
+}
+
+/// Migration v5: Add tables for semantic embeddings and keyword extraction.
+fn migrate_v5(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS entry_embeddings (
+            entry_id       TEXT PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+            embedding      BLOB NOT NULL,
+            model_version  TEXT NOT NULL,
+            created_at     TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS entry_keywords (
+            entry_id  TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+            keyword   TEXT NOT NULL,
+            score     REAL NOT NULL,
+            PRIMARY KEY (entry_id, keyword)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_entry_keywords_keyword
+            ON entry_keywords(keyword);",
     )?;
     Ok(())
 }
