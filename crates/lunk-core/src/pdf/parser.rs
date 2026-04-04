@@ -806,4 +806,36 @@ mod tests {
         let (val, _) = parse_value(b"-5", 0).unwrap();
         assert_eq!(val.as_i64(), Some(-5));
     }
+
+    // --- Error path tests ---
+
+    #[test]
+    fn test_parse_empty_input() {
+        assert!(parse_value(b"", 0).is_err());
+    }
+
+    #[test]
+    fn test_parse_unexpected_byte() {
+        assert!(parse_value(b"@", 0).is_err());
+    }
+
+    #[test]
+    fn test_parse_unterminated_string() {
+        assert!(parse_value(b"(hello", 0).is_err());
+    }
+
+    #[test]
+    fn test_parse_unterminated_array() {
+        assert!(parse_value(b"[1 2 3", 0).is_err());
+    }
+
+    #[test]
+    fn test_parse_unterminated_dict() {
+        assert!(parse_value(b"<< /Key", 0).is_err());
+    }
+
+    #[test]
+    fn test_parse_indirect_obj_missing_obj_keyword() {
+        assert!(parse_indirect_object(b"1 0 xyz", 0).is_err());
+    }
 }

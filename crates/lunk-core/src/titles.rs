@@ -306,4 +306,95 @@ mod tests {
         assert_eq!(truncate("short", 100), "short");
         assert_eq!(truncate("hello world this is long", 15), "hello world");
     }
+
+    #[test]
+    fn test_title_from_html_nested_tags() {
+        let html = b"<div><h1><a href='#'>Linked Title</a></h1></div>";
+        assert_eq!(title_from_readable_html(html), Some("Linked Title".into()));
+    }
+
+    #[test]
+    fn test_title_from_html_empty() {
+        let html = b"<div><p>No headings here</p></div>";
+        assert_eq!(title_from_readable_html(html), None);
+    }
+
+    #[test]
+    fn test_title_from_html_short_heading() {
+        let html = b"<h1>Hi</h1><h2>Real Title Here</h2>";
+        // "Hi" is too short (<5 chars), should fall back to h2
+        assert_eq!(title_from_readable_html(html), Some("Real Title Here".into()));
+    }
+
+    #[test]
+    fn test_title_from_text_all_junk() {
+        let text = "Skip to content\nhttps://example.com\nCopyright 2024\nPage 1\n";
+        assert_eq!(title_from_text(text), None);
+    }
+
+    #[test]
+    fn test_title_from_text_prefers_earlier_lines() {
+        let text = "First Good Title Line Here\nSecond Also Good Title Line\nBody text follows.";
+        let title = title_from_text(text).unwrap();
+        assert!(title.contains("First"), "should prefer first line, got: {title}");
+    }
+
+    #[test]
+    fn test_clean_title_collapses_whitespace() {
+        assert_eq!(clean_title("  Title   with   spaces  "), "Title with spaces");
+    }
+
+    #[test]
+    fn test_clean_title_strips_prefix() {
+        assert_eq!(clean_title("PDF: Some Document"), "Some Document");
+        assert_eq!(clean_title("Re: Discussion Thread Title Here"), "Discussion Thread Title Here");
+    }
+
+    #[test]
+    fn test_clean_title_multiple_separators() {
+        let result = clean_title("Article Title - Subtitle - Site Name");
+        // Should strip the last separator (Site Name) since it's shortest
+        assert!(result.contains("Article Title"), "got: {result}");
+    }
+
+    #[test]
+    fn test_is_junk_line_comprehensive() {
+        // URLs
+        assert!(is_junk_line("https://example.com/page"));
+        assert!(is_junk_line("www.example.com"));
+        assert!(is_junk_line("mailto:user@example.com"));
+        // Navigation
+        assert!(is_junk_line("Skip to main content"));
+        assert!(is_junk_line("Subscribe to newsletter"));
+        // Dates
+        assert!(is_junk_line("Posted on January 5, 2024"));
+        assert!(is_junk_line("Published: March 2023"));
+        // Metadata
+        assert!(is_junk_line("Page 12"));
+        assert!(is_junk_line("Author affiliations"));
+        assert!(is_junk_line("Subscriber access provided by MIT"));
+        // Numbers
+        assert!(is_junk_line("12345"));
+        assert!(is_junk_line("3.14 - 2.71"));
+        // Good titles should NOT be junk
+        assert!(!is_junk_line("Digital Filter Design for Audio"));
+        assert!(!is_junk_line("A Review of Impedance Spectroscopy Methods"));
+    }
+
+    #[test]
+    fn test_is_junk_heading() {
+        assert!(is_junk_heading("Abstract"));
+        assert!(is_junk_heading("INTRODUCTION"));
+        assert!(is_junk_heading("1. Introduction"));
+        assert!(!is_junk_heading("Digital Filter Design"));
+    }
+
+    #[test]
+    fn test_starts_like_body_text() {
+        assert!(starts_like_body_text("The quick brown fox"));
+        assert!(starts_like_body_text("In this paper we present"));
+        assert!(starts_like_body_text("We propose a novel approach"));
+        assert!(!starts_like_body_text("Digital Filter Design"));
+        assert!(!starts_like_body_text("MP6002 Monolithic Converter"));
+    }
 }

@@ -519,4 +519,24 @@ mod tests {
         let pages = doc.pages();
         assert_eq!(pages.len(), 15);
     }
+
+    // --- Error path tests ---
+
+    #[test]
+    fn test_load_empty_file() {
+        let result = PdfDoc::load(b"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_not_pdf() {
+        let result = PdfDoc::load(b"<html><body>not a pdf</body></html>");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_truncated_pdf() {
+        let result = PdfDoc::load(b"%PDF-1.4\n%truncated");
+        assert!(result.is_err());
+    }
 }
