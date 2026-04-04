@@ -119,6 +119,32 @@ jobs:
           path: target/release/bundle/appimage/*.AppImage
           retention-days: 1
 
+  build-app-macos:
+    runs-on: macos-latest # arm64 runner; universal target builds for both architectures
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: cd frontend && bun install --frozen-lockfile
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build Tauri app (universal binary)
+        run: cd crates/lunk-app && cargo tauri build --target universal-apple-darwin
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v7
+        with:
+          name: lunk-macos-dmg
+          path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          retention-days: 1
+
   build-app-windows:
     runs-on: windows-latest
     steps:
@@ -169,7 +195,7 @@ jobs:
           retention-days: 1
 
   release:
-    needs: [build-cli, build-app-linux, build-app-windows, build-extension]
+    needs: [build-cli, build-app-linux, build-app-macos, build-app-windows, build-extension]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -190,6 +216,7 @@ jobs:
           # Desktop app bundles
           cp artifacts/lunk-linux-deb/*.deb release/ 2>/dev/null || true
           cp artifacts/lunk-linux-appimage/*.AppImage release/ 2>/dev/null || true
+          cp artifacts/lunk-macos-dmg/*.dmg release/ 2>/dev/null || true
           cp artifacts/lunk-windows-msi/*.msi release/ 2>/dev/null || true
           cp artifacts/lunk-windows-nsis/*.exe release/ 2>/dev/null || true
           # Extension
@@ -217,7 +244,12 @@ jobs:
             ```
 
             ### Desktop App
-            Download the `.deb`, `.AppImage`, `.msi`, or `.exe` installer from the assets below.
+            Download the installer for your platform:
+            - **macOS**: `.dmg` (universal — works on both Intel and Apple Silicon)
+            - **Linux**: `.deb` or `.AppImage`
+            - **Windows**: `.msi` or `.exe`
+
+            > **macOS note**: The app is not code-signed. On first launch, right-click the app → Open → confirm.
 
             ### Chrome Extension
             Download `lunk-extension.zip`, unzip, then load as an unpacked extension in `chrome://extensions`.
