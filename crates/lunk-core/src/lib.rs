@@ -11,5 +11,6 @@ pub mod repo;
 pub mod schema;
 pub mod search;
 pub mod sync;
+pub mod titles;
 pub mod topics;
 pub mod transport;

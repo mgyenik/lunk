@@ -943,6 +943,71 @@ pub fn get_tag_suggestions(conn: &Connection, domain: Option<&str>, title: &str)
     })
 }
 
+// --- Retitling ---
+
+/// Re-generate titles for all entries using the current title extraction logic.
+/// Articles: readable HTML headings → text heuristics.
+/// PDFs: font-size extraction → metadata title → text heuristics.
+/// Returns (total, updated) counts.
+#[allow(clippy::type_complexity)]
+pub fn retitle_all(conn: &Connection) -> Result<(usize, usize)> {
+    use crate::titles;
+
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.title, e.content_type, ec.extracted_text, ec.readable_html, ec.pdf_data
+         FROM entries e
+         JOIN entry_content ec ON ec.entry_id = e.id",
+    )?;
+
+    let rows: Vec<(String, String, String, String, Option<Vec<u8>>, Option<Vec<u8>>)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<Vec<u8>>>(4)?,
+                row.get::<_, Option<Vec<u8>>>(5)?,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let mut total = 0;
+    let mut updated = 0;
+
+    for (id, old_title, content_type, extracted_text, readable_html, pdf_data) in &rows {
+        total += 1;
+
+        let new_title = if content_type == "article" {
+            readable_html
+                .as_ref()
+                .and_then(|html| titles::title_from_readable_html(html))
+                .or_else(|| titles::title_from_text(extracted_text))
+        } else {
+            pdf_data
+                .as_ref()
+                .and_then(|data| crate::pdf::extract_title(data))
+                .or_else(|| titles::title_from_text(extracted_text))
+        };
+
+        let new_title = new_title.map(|t| titles::clean_title(&t));
+
+        if let Some(ref title) = new_title
+            && title != old_title
+        {
+            conn.execute(
+                "UPDATE entries SET title = ?1, updated_at = ?2 WHERE id = ?3",
+                params![title, Utc::now().to_rfc3339(), id],
+            )?;
+            tracing::info!(id, old = old_title, new = title, "retitled");
+            updated += 1;
+        }
+    }
+
+    Ok((total, updated))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

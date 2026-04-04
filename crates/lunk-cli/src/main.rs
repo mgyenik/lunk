@@ -117,6 +117,8 @@ enum Commands {
     },
     /// Rebuild the full-text search index from scratch
     RebuildFts,
+    /// Re-extract titles for all entries using current extraction logic
+    Retitle,
     /// Re-extract text from stored PDFs that have no extracted text
     BackfillPdfs,
     /// Transfer entries from another profile or database
@@ -206,6 +208,7 @@ async fn main() {
         }
         Some(Commands::Transfer { from }) => cli::transfer(&from),
         Some(Commands::RebuildFts) => cli::rebuild_fts(),
+        Some(Commands::Retitle) => cli::retitle(),
         Some(Commands::BackfillPdfs) => cli::backfill_pdfs(),
         Some(Commands::MigrateStatus) => cli::migrate_status(),
         None => {

@@ -55,6 +55,275 @@ fn extract_page_text(doc: &PdfDoc, page: &super::document::PageInfo) -> String {
     super::dehyphenate::dehyphenate(&text)
 }
 
+/// Extract the title from page 1 using font-size heuristics.
+/// Returns the text rendered in the largest font on the first page.
+/// This is the most reliable way to find the title of a PDF document.
+#[allow(clippy::collapsible_if, clippy::unnecessary_to_owned)]
+pub(crate) fn extract_title_by_font_size(doc: &PdfDoc) -> Option<String> {
+    let pages = doc.pages();
+    let page = pages.first()?;
+
+    let content_data = doc.page_content(page).ok()?;
+    let resources = doc.page_resources(page);
+    let fonts = build_font_map(doc, &resources);
+
+    let ops = parse_content_ops(&content_data)?;
+
+    // Collect (font_size, text) spans
+    let mut spans: Vec<(f64, String)> = Vec::new();
+    let mut current_font: Option<&FontEncoding> = None;
+    let mut current_size: f64 = 0.0;
+    let mut current_text = String::new();
+
+    for op in &ops {
+        match op.operator.as_slice() {
+            b"Tf" => {
+                // Flush current span
+                let trimmed = current_text.trim().to_string();
+                if !trimmed.is_empty() && current_size > 0.0 {
+                    spans.push((current_size, trimmed));
+                }
+                current_text.clear();
+
+                if let Some(font_name) = op.operands.first().and_then(|v| v.as_name()) {
+                    current_font = fonts.get(&font_name.to_vec());
+                }
+                if let Some(size) = op.operands.get(1).and_then(|v| v.as_f64()) {
+                    current_size = size.abs();
+                }
+            }
+            b"Tj" | b"'" | b"\"" => {
+                for operand in &op.operands {
+                    if let Some(bytes) = operand.as_str_bytes() {
+                        if let Some(enc) = current_font {
+                            current_text.push_str(&encoding::decode_text(enc, bytes));
+                        }
+                    }
+                }
+            }
+            b"TJ" => {
+                for operand in &op.operands {
+                    if let PdfVal::Array(arr) = operand {
+                        for item in arr {
+                            if let Some(bytes) = item.as_str_bytes() {
+                                if let Some(enc) = current_font {
+                                    current_text.push_str(&encoding::decode_text(enc, bytes));
+                                }
+                            } else if let Some(n) = item.as_i64() {
+                                if n < -100 {
+                                    current_text.push(' ');
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            b"ET" => {
+                current_text.push(' ');
+            }
+            b"Do" => {
+                // Recurse into Form XObjects for font-size extraction
+                if let Some(xobj_name) = op.operands.first().and_then(|v| v.as_name()) {
+                    if let Some(form_spans) = extract_form_xobject_spans(doc, &resources, xobj_name, &fonts) {
+                        // Flush current span first
+                        let trimmed = current_text.trim().to_string();
+                        if !trimmed.is_empty() && current_size > 0.0 {
+                            spans.push((current_size, trimmed));
+                        }
+                        current_text.clear();
+                        spans.extend(form_spans);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Flush final span
+    let trimmed = current_text.trim().to_string();
+    if !trimmed.is_empty() && current_size > 0.0 {
+        spans.push((current_size, trimmed));
+    }
+
+    if spans.is_empty() {
+        return None;
+    }
+
+    // Find the maximum font size
+    let max_size = spans.iter().map(|(s, _)| *s).fold(0.0f64, f64::max);
+
+    if max_size <= 0.0 {
+        return None;
+    }
+
+    // Collect all text at the largest font size (may span multiple Tf blocks)
+    let title_parts: Vec<&str> = spans
+        .iter()
+        .filter(|(size, _)| (*size - max_size).abs() < 0.5) // Within 0.5pt of max
+        .map(|(_, text)| text.as_str())
+        .collect();
+
+    let title = title_parts.join(" ");
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" "); // normalize whitespace
+    let title = title.trim().to_string();
+
+    if title.len() >= 5 && title.len() <= 300 && !is_publisher_junk(&title) {
+        Some(title)
+    } else {
+        // Try second-largest font size
+        let second_max = spans
+            .iter()
+            .map(|(s, _)| *s)
+            .filter(|s| (s - max_size).abs() >= 0.5)
+            .fold(0.0f64, f64::max);
+
+        if second_max > 0.0 {
+            let parts: Vec<&str> = spans
+                .iter()
+                .filter(|(size, _)| (*size - second_max).abs() < 0.5)
+                .map(|(_, text)| text.as_str())
+                .collect();
+            let title2 = parts.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+            let title2 = title2.trim().to_string();
+            if title2.len() >= 5 && title2.len() <= 300 && !is_publisher_junk(&title2) {
+                return Some(title2);
+            }
+        }
+
+        None
+    }
+}
+
+/// Check if text looks like publisher/journal junk rather than an actual title.
+fn is_publisher_junk(text: &str) -> bool {
+    let l = text.to_lowercase();
+    let junk = [
+        "view article online",
+        "author's accepted manuscript",
+        "accepted manuscript",
+        "published online",
+        "downloaded from",
+        "this article",
+        "all rights reserved",
+        "doi:",
+        "issn",
+        "copyright",
+        "open access",
+        "creative commons",
+        "supplementary",
+        "electronic supplementary",
+        "lab on a chip",
+        "labon",
+    ];
+    junk.iter().any(|j| l.contains(j))
+}
+
+/// Extract (font_size, text) spans from a Form XObject.
+#[allow(clippy::collapsible_if, clippy::unnecessary_to_owned)]
+fn extract_form_xobject_spans(
+    doc: &PdfDoc,
+    resources: &[&BTreeMap<Vec<u8>, PdfVal>],
+    xobj_name: &[u8],
+    page_fonts: &FontMap,
+) -> Option<Vec<(f64, String)>> {
+    let xobj_ref = resources.iter().find_map(|res| {
+        let xobjects = dict_get(res, b"XObject")?;
+        let xobj_dict = doc.resolve(xobjects).as_dict()?;
+        Some(dict_get(xobj_dict, xobj_name)?.clone())
+    })?;
+
+    let xobj = doc.resolve(&xobj_ref);
+    let dict = xobj.as_dict()?;
+
+    let is_form = dict_get(dict, b"Subtype")
+        .and_then(|v| v.as_name())
+        .is_some_and(|n| n == b"Form");
+    if !is_form {
+        return None;
+    }
+
+    let form_data = doc.stream_data(xobj).ok()?;
+
+    // Build fonts from form resources + page resources
+    let form_res = dict_get(dict, b"Resources")
+        .map(|v| doc.resolve(v))
+        .and_then(|v| v.as_dict());
+    let mut combined: Vec<&BTreeMap<Vec<u8>, PdfVal>> = Vec::new();
+    if let Some(frd) = form_res {
+        combined.push(frd);
+    }
+    combined.extend_from_slice(resources);
+    let form_fonts = build_font_map(doc, &combined);
+
+    let ops = parse_content_ops(&form_data)?;
+
+    let mut spans = Vec::new();
+    let mut current_font: Option<&FontEncoding> = None;
+    let mut current_size: f64 = 0.0;
+    let mut current_text = String::new();
+
+    // Use form_fonts, falling back to page_fonts
+    let get_font = |name: &[u8]| -> Option<&FontEncoding> {
+        form_fonts.get(name).or_else(|| page_fonts.get(name))
+    };
+
+    for op in &ops {
+        match op.operator.as_slice() {
+            b"Tf" => {
+                let trimmed = current_text.trim().to_string();
+                if !trimmed.is_empty() && current_size > 0.0 {
+                    spans.push((current_size, trimmed));
+                }
+                current_text.clear();
+
+                if let Some(font_name) = op.operands.first().and_then(|v| v.as_name()) {
+                    current_font = get_font(font_name);
+                }
+                if let Some(size) = op.operands.get(1).and_then(|v| v.as_f64()) {
+                    current_size = size.abs();
+                }
+            }
+            b"Tj" | b"'" | b"\"" => {
+                for operand in &op.operands {
+                    if let Some(bytes) = operand.as_str_bytes() {
+                        if let Some(enc) = current_font {
+                            current_text.push_str(&encoding::decode_text(enc, bytes));
+                        }
+                    }
+                }
+            }
+            b"TJ" => {
+                for operand in &op.operands {
+                    if let PdfVal::Array(arr) = operand {
+                        for item in arr {
+                            if let Some(bytes) = item.as_str_bytes() {
+                                if let Some(enc) = current_font {
+                                    current_text.push_str(&encoding::decode_text(enc, bytes));
+                                }
+                            } else if let Some(n) = item.as_i64() {
+                                if n < -100 {
+                                    current_text.push(' ');
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            b"ET" => {
+                current_text.push(' ');
+            }
+            _ => {}
+        }
+    }
+
+    let trimmed = current_text.trim().to_string();
+    if !trimmed.is_empty() && current_size > 0.0 {
+        spans.push((current_size, trimmed));
+    }
+
+    Some(spans)
+}
+
 /// Font map: font name -> encoding.
 type FontMap = BTreeMap<Vec<u8>, FontEncoding>;
 

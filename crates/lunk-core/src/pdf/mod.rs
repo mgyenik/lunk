@@ -65,9 +65,21 @@ pub fn extract_pages(data: &[u8]) -> Vec<(i32, String)> {
     text::extract_all_pages(&doc)
 }
 
-/// Extract the title from PDF metadata (Info dictionary), if present.
+/// Extract the title from a PDF using multiple strategies:
+/// 1. Font-size heuristic: largest text on page 1 (most reliable)
+/// 2. PDF metadata Info dictionary /Title field
+/// 3. Returns None if no good title found
 pub fn extract_title(data: &[u8]) -> Option<String> {
     let doc = document::PdfDoc::load(data).ok()?;
+
+    // Strategy 1: largest font on page 1
+    if let Some(title) = text::extract_title_by_font_size(&doc)
+        && !is_generic_title(&title)
+    {
+        return Some(title);
+    }
+
+    // Strategy 2: PDF metadata
     let info_ref = doc.info_ref?;
     let info = doc.get(info_ref)?;
     let info_dict = info.as_dict()?;

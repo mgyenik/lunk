@@ -415,6 +415,16 @@ pub fn backfill_pdfs() -> Result<()> {
     Ok(())
 }
 
+pub fn retitle() -> Result<()> {
+    let db_path = Config::db_path()?;
+    eprintln!("database: {}", db_path.display());
+
+    let conn = open_conn()?;
+    let (total, updated) = repo::retitle_all(&conn)?;
+    println!("Retitled {updated} of {total} entries");
+    Ok(())
+}
+
 pub fn rebuild_fts() -> Result<()> {
     let profile = config::active_profile();
     let db_path = Config::db_path()?;
