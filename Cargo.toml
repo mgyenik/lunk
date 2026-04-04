@@ -12,5 +12,4 @@ version = "0.2.0"
 edition = "2024"
 license = "MIT"
 
-[patch.crates-io]
-lopdf = { path = "vendor/lopdf" }
+

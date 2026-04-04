@@ -1,0 +1,649 @@
+//! Content stream interpreter for text extraction.
+//!
+//! Walks the PDF content stream operators (BT/ET, Tf, Tj, TJ, ', ", Do)
+//! and decodes text using resolved font encodings. Handles Form XObject
+//! recursion and ActualText marked content.
+
+use std::collections::BTreeMap;
+
+use super::document::PdfDoc;
+use super::encoding::{self, FontEncoding};
+use super::parser::{PdfVal, dict_get};
+
+/// Extract text from all pages of a document.
+pub(crate) fn extract_all_pages(doc: &PdfDoc) -> Vec<(i32, String)> {
+    let pages = doc.pages();
+    let mut result = Vec::new();
+
+    for page in &pages {
+        let text = extract_page_text(doc, page);
+        let trimmed = text.trim().to_string();
+        if !trimmed.is_empty() {
+            result.push((page.page_num, trimmed));
+        }
+    }
+
+    result
+}
+
+/// Extract text from a single page.
+fn extract_page_text(doc: &PdfDoc, page: &super::document::PageInfo) -> String {
+    // Get content stream
+    let content_data = match doc.page_content(page) {
+        Ok(d) => d,
+        Err(_) => return String::new(),
+    };
+
+    // Build font encodings from page resources
+    let resources = doc.page_resources(page);
+    let fonts = build_font_map(doc, &resources);
+
+    // Interpret content stream
+    let mut ctx = TextContext {
+        doc,
+        fonts: &fonts,
+        text: String::new(),
+        current_font: None,
+        actual_text: None,
+        actual_text_depth: 0,
+    };
+
+    interpret_content(&content_data, &mut ctx, &resources, 0);
+
+    // Post-processing
+    let text = encoding::expand_ligatures(&ctx.text);
+    super::dehyphenate::dehyphenate(&text)
+}
+
+/// Font map: font name -> encoding.
+type FontMap = BTreeMap<Vec<u8>, FontEncoding>;
+
+/// State for content stream interpretation.
+struct TextContext<'a> {
+    doc: &'a PdfDoc,
+    fonts: &'a FontMap,
+    text: String,
+    current_font: Option<&'a FontEncoding>,
+    /// If inside a BDC/EMC span with /ActualText, this holds the replacement text.
+    actual_text: Option<String>,
+    /// Nesting depth of the ActualText span (for tracking nested BMC/EMC).
+    actual_text_depth: u32,
+}
+
+/// Build font name -> encoding map from page resources.
+fn build_font_map(
+    doc: &PdfDoc,
+    resources: &[&BTreeMap<Vec<u8>, PdfVal>],
+) -> FontMap {
+    let mut fonts = FontMap::new();
+
+    for res_dict in resources {
+        let font_dict_val = match dict_get(res_dict, b"Font") {
+            Some(v) => v,
+            None => continue,
+        };
+        let font_dict = match doc.resolve(font_dict_val).as_dict() {
+            Some(d) => d,
+            None => continue,
+        };
+
+        for (name, val) in font_dict.iter() {
+            if fonts.contains_key(name) {
+                continue; // Earlier (higher priority) resource already defined this font
+            }
+            let font = match doc.resolve(val).as_dict() {
+                Some(d) => d,
+                None => continue,
+            };
+            let enc = encoding::resolve_font_encoding(doc, font);
+            fonts.insert(name.clone(), enc);
+        }
+    }
+
+    fonts
+}
+
+/// Interpret a content stream, extracting text.
+fn interpret_content(
+    data: &[u8],
+    ctx: &mut TextContext,
+    resources: &[&BTreeMap<Vec<u8>, PdfVal>],
+    depth: u32,
+) {
+    if depth > 10 {
+        return; // Prevent infinite recursion
+    }
+
+    let ops = match parse_content_ops(data) {
+        Some(ops) => ops,
+        None => return,
+    };
+
+    let mut marked_depth: u32 = 0; // Track BMC/BDC nesting
+
+    for op in &ops {
+        match op.operator.as_slice() {
+            // Begin text object
+            b"BT" => {}
+
+            // End text object — add newline
+            b"ET" => {
+                if ctx.actual_text.is_none() && !ctx.text.ends_with('\n') {
+                    ctx.text.push('\n');
+                }
+            }
+
+            // Set font
+            b"Tf" => {
+                if let Some(font_name) = op.operands.first().and_then(|v| v.as_name()) {
+                    ctx.current_font = ctx.fonts.get(&font_name.to_vec());
+                }
+            }
+
+            // Show string
+            b"Tj" | b"'" | b"\"" => {
+                if ctx.actual_text.is_none() {
+                    for operand in &op.operands {
+                        if let Some(bytes) = operand.as_str_bytes() {
+                            decode_and_append(ctx, bytes);
+                        }
+                    }
+                }
+            }
+
+            // Show string with positioning
+            b"TJ" => {
+                if ctx.actual_text.is_none() {
+                    for operand in &op.operands {
+                        match operand {
+                            PdfVal::Array(arr) => {
+                                for item in arr {
+                                    match item {
+                                        PdfVal::Str(bytes) => {
+                                            decode_and_append(ctx, bytes);
+                                        }
+                                        PdfVal::Int(n) => {
+                                            if *n < -100 {
+                                                ctx.text.push(' ');
+                                            }
+                                        }
+                                        PdfVal::Real(f) => {
+                                            if *f < -100.0 {
+                                                ctx.text.push(' ');
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            PdfVal::Str(bytes) => {
+                                decode_and_append(ctx, bytes);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            // Text positioning — insert newline for vertical movement.
+            // Any vertical offset > 0.5 indicates a new line. This can
+            // split chart axis labels that use per-character positioning,
+            // but catches all real line breaks needed for dehyphenation.
+            b"Td" | b"TD" => {
+                if let Some(ty) = op.operands.get(1).and_then(|v| v.as_f64())
+                    && ty.abs() > 0.5
+                    && !ctx.text.ends_with('\n')
+                {
+                    ctx.text.push('\n');
+                }
+            }
+
+            b"T*" => {
+                if !ctx.text.ends_with('\n') {
+                    ctx.text.push('\n');
+                }
+            }
+
+            b"Tm" => {}
+
+            // Begin marked content (for ActualText)
+            b"BDC" => {
+                marked_depth += 1;
+                // Check if this has /ActualText
+                if ctx.actual_text.is_none()
+                    && let Some(actual) = extract_actual_text(&op.operands, ctx.doc)
+                {
+                    ctx.actual_text = Some(actual);
+                    ctx.actual_text_depth = marked_depth;
+                }
+            }
+
+            b"BMC" => {
+                marked_depth += 1;
+            }
+
+            // End marked content
+            b"EMC" => {
+                if ctx.actual_text.is_some() && marked_depth == ctx.actual_text_depth {
+                    // End of ActualText span — emit the replacement text
+                    if let Some(actual) = ctx.actual_text.take() {
+                        ctx.text.push_str(&actual);
+                    }
+                    ctx.actual_text_depth = 0;
+                }
+                marked_depth = marked_depth.saturating_sub(1);
+            }
+
+            // Invoke XObject (Form XObject recursion)
+            b"Do" => {
+                if let Some(xobj_name) = op.operands.first().and_then(|v| v.as_name()) {
+                    handle_do_operator(ctx, resources, xobj_name, depth);
+                }
+            }
+
+            _ => {}
+        }
+    }
+}
+
+/// Decode bytes using the current font encoding and append to text.
+fn decode_and_append(ctx: &mut TextContext, bytes: &[u8]) {
+    if let Some(enc) = ctx.current_font {
+        let decoded = encoding::decode_text(enc, bytes);
+        ctx.text.push_str(&decoded);
+    }
+}
+
+/// Handle the `Do` operator — invoke a Form XObject.
+fn handle_do_operator(
+    ctx: &mut TextContext,
+    resources: &[&BTreeMap<Vec<u8>, PdfVal>],
+    xobj_name: &[u8],
+    depth: u32,
+) {
+    // Find the XObject in resources
+    let xobj_ref = resources.iter().find_map(|res| {
+        let xobjects = dict_get(res, b"XObject")?;
+        let xobj_dict = ctx.doc.resolve(xobjects).as_dict()?;
+        Some(dict_get(xobj_dict, xobj_name)?.clone())
+    });
+
+    let xobj_ref = match xobj_ref {
+        Some(r) => r,
+        None => return,
+    };
+
+    let xobj = ctx.doc.resolve(&xobj_ref);
+
+    // Check it's a Form XObject
+    let dict = match xobj.as_dict() {
+        Some(d) => d,
+        None => return,
+    };
+
+    let is_form = dict_get(dict, b"Subtype")
+        .and_then(|v| v.as_name())
+        .is_some_and(|n| n == b"Form");
+    if !is_form {
+        return;
+    }
+
+    // Get the Form XObject's content data
+    let form_data = match ctx.doc.stream_data(xobj) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    // Build font map from the Form XObject's own Resources
+    let form_resources = dict_get(dict, b"Resources")
+        .map(|v| ctx.doc.resolve(v));
+    let form_res_dict = form_resources.and_then(|v| v.as_dict());
+
+    // Combine form resources with inherited page resources
+    let mut combined_resources: Vec<&BTreeMap<Vec<u8>, PdfVal>> = Vec::new();
+    if let Some(frd) = form_res_dict {
+        combined_resources.push(frd);
+    }
+    combined_resources.extend_from_slice(resources);
+
+    let form_fonts = build_font_map(ctx.doc, &combined_resources);
+
+    // Create a new context for the Form XObject (avoids lifetime issues)
+    let mut form_ctx = TextContext {
+        doc: ctx.doc,
+        fonts: &form_fonts,
+        text: String::new(),
+        current_font: None,
+        actual_text: None,
+        actual_text_depth: 0,
+    };
+
+    interpret_content(&form_data, &mut form_ctx, &combined_resources, depth + 1);
+
+    // Append form text to parent context
+    if !form_ctx.text.is_empty() {
+        if !ctx.text.is_empty() && !ctx.text.ends_with('\n') {
+            ctx.text.push('\n');
+        }
+        ctx.text.push_str(&form_ctx.text);
+    }
+}
+
+/// Extract /ActualText from BDC operands.
+fn extract_actual_text(operands: &[PdfVal], doc: &PdfDoc) -> Option<String> {
+    // BDC operands: /Tag <dict> or /Tag <name>
+    // We want the dict with /ActualText
+    for operand in operands {
+        let dict = match operand {
+            PdfVal::Dict(d) => d,
+            PdfVal::Ref(_, _) => doc.resolve(operand).as_dict()?,
+            _ => continue,
+        };
+        if let Some(val) = dict_get(dict, b"ActualText")
+            && let Some(bytes) = val.as_str_bytes()
+        {
+            return Some(encoding::decode_pdf_string(bytes));
+        }
+    }
+    None
+}
+
+/// A parsed content stream operation.
+struct ContentOp {
+    operator: Vec<u8>,
+    operands: Vec<PdfVal>,
+}
+
+/// Parse a content stream into a sequence of operations.
+/// This is a lenient parser that handles inline images (BI/ID/EI) by skipping them.
+fn parse_content_ops(data: &[u8]) -> Option<Vec<ContentOp>> {
+    let mut ops = Vec::new();
+    let mut operand_stack: Vec<PdfVal> = Vec::new();
+    let mut pos = 0;
+
+    while pos < data.len() {
+        pos = super::parser::skip_whitespace(data, pos);
+        if pos >= data.len() {
+            break;
+        }
+
+        let b = data[pos];
+
+        // Try to parse as a value (number, string, name, array, dict)
+        match b {
+            b'(' | b'<' | b'[' | b'+' | b'-' | b'.' | b'0'..=b'9' | b'/' => {
+                match super::parser::parse_value(data, pos) {
+                    Ok((val, end)) => {
+                        operand_stack.push(val);
+                        pos = end;
+                    }
+                    Err(_) => {
+                        pos += 1; // Skip unparseable byte
+                    }
+                }
+            }
+            b't' | b'f' | b'n' => {
+                // Could be true/false/null or an operator
+                if let Ok((val, end)) = super::parser::parse_value(data, pos) {
+                    operand_stack.push(val);
+                    pos = end;
+                } else {
+                    // It's an operator
+                    let (op, end) = read_operator(data, pos);
+                    let operands = std::mem::take(&mut operand_stack);
+                    ops.push(ContentOp {
+                        operator: op,
+                        operands,
+                    });
+                    pos = end;
+                }
+            }
+            _ => {
+                // Must be an operator
+                let (op, end) = read_operator(data, pos);
+
+                // Handle inline images: BI ... ID <data> EI
+                if op == b"BI" {
+                    pos = skip_inline_image(data, end);
+                    operand_stack.clear();
+                    continue;
+                }
+
+                let operands = std::mem::take(&mut operand_stack);
+                ops.push(ContentOp {
+                    operator: op,
+                    operands,
+                });
+                pos = end;
+            }
+        }
+    }
+
+    Some(ops)
+}
+
+/// Read an operator keyword (sequence of non-whitespace, non-delimiter bytes).
+fn read_operator(data: &[u8], pos: usize) -> (Vec<u8>, usize) {
+    let mut end = pos;
+    while end < data.len()
+        && !data[end].is_ascii_whitespace()
+        && !matches!(data[end], b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'/' | b'%')
+    {
+        end += 1;
+    }
+    if end == pos {
+        // Single byte operator or unexpected
+        return (vec![data[pos]], pos + 1);
+    }
+    (data[pos..end].to_vec(), end)
+}
+
+/// Skip past an inline image (BI ... ID <data> EI).
+fn skip_inline_image(data: &[u8], mut pos: usize) -> usize {
+    // Find "ID" keyword (image data start)
+    while pos + 1 < data.len() {
+        if data[pos] == b'I' && data[pos + 1] == b'D' {
+            pos += 2;
+            // Skip the single whitespace after ID
+            if pos < data.len() && (data[pos] == b' ' || data[pos] == b'\n') {
+                pos += 1;
+            }
+            break;
+        }
+        pos += 1;
+    }
+
+    // Find "EI" keyword (preceded by whitespace)
+    while pos + 2 < data.len() {
+        if (data[pos] == b'\n' || data[pos] == b'\r' || data[pos] == b' ')
+            && data[pos + 1] == b'E'
+            && data[pos + 2] == b'I'
+            && (pos + 3 >= data.len() || data[pos + 3].is_ascii_whitespace())
+        {
+            return pos + 3;
+        }
+        pos += 1;
+    }
+
+    data.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_content_ops() {
+        let data = b"BT /F1 12 Tf (Hello) Tj ET";
+        let ops = parse_content_ops(data).unwrap();
+
+        assert_eq!(ops.len(), 4); // BT, Tf, Tj, ET
+        assert_eq!(ops[0].operator, b"BT");
+        assert_eq!(ops[1].operator, b"Tf");
+        assert_eq!(ops[1].operands.len(), 2); // /F1 and 12
+        assert_eq!(ops[2].operator, b"Tj");
+        assert_eq!(ops[2].operands[0].as_str_bytes(), Some(b"Hello".as_slice()));
+        assert_eq!(ops[3].operator, b"ET");
+    }
+
+    #[test]
+    fn test_parse_tj_array() {
+        let data = b"[( Hello ) -100 ( World )] TJ";
+        let ops = parse_content_ops(data).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].operator, b"TJ");
+        let arr = ops[0].operands[0].as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+    }
+
+    #[test]
+    fn test_skip_inline_image() {
+        let data = b"q BI /W 10 /H 10 /CS /G /BPC 8 ID\x00\x01\x02\x03\nEI Q";
+        let ops = parse_content_ops(data).unwrap();
+        // Should have q and Q, with the inline image skipped
+        let op_names: Vec<_> = ops.iter().map(|op| op.operator.clone()).collect();
+        assert!(op_names.contains(&b"q".to_vec()));
+        assert!(op_names.contains(&b"Q".to_vec()));
+    }
+
+    #[test]
+    fn test_extract_real_pdf() {
+        // Test with the MP6002 PDF
+        let path = std::path::Path::new("/home/m/Downloads/MP6002.pdf");
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        let doc = PdfDoc::load(&data).unwrap();
+        let pages = extract_all_pages(&doc);
+        assert!(!pages.is_empty(), "should extract text from MP6002");
+        // Check that we got all 15 pages
+        assert_eq!(pages.len(), 15);
+        // Check first page has some recognizable content
+        let (_, text) = &pages[0];
+        assert!(
+            text.contains("MP6002") || text.contains("Monolithic"),
+            "page 1 should contain 'MP6002' or 'Monolithic', got: {}",
+            &text[..text.len().min(200)]
+        );
+    }
+
+    #[test]
+    fn test_extract_broken_trailer_pdf() {
+        let path = std::path::Path::new(
+            "/home/m/Downloads/Second_Order_Digital_Filters_Done_Right.pdf",
+        );
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        let doc = PdfDoc::load(&data).unwrap();
+        let pages = extract_all_pages(&doc);
+        assert!(!pages.is_empty(), "should extract text from broken-trailer PDF");
+    }
+
+    #[test]
+    fn test_scanned_pdf_returns_empty() {
+        let path =
+            std::path::Path::new("/home/m/Downloads/making-digital-filters-sound-analog.pdf");
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        let doc = PdfDoc::load(&data).unwrap();
+        let pages = extract_all_pages(&doc);
+        // Scanned PDF with no text layer should return empty
+        assert!(pages.is_empty(), "scanned PDF should have no extractable text");
+    }
+
+    #[test]
+    #[ignore] // Debug test — run manually with --ignored
+    fn test_debug_broken_pdf_fonts() {
+        let path = std::path::Path::new(
+            "/home/m/Downloads/Second_Order_Digital_Filters_Done_Right.pdf",
+        );
+        if !path.exists() {
+            return;
+        }
+        let data = std::fs::read(path).unwrap();
+        let doc = PdfDoc::load(&data).unwrap();
+        let pages = doc.pages();
+        let page = &pages[0];
+        let resources = doc.page_resources(page);
+        for (i, res) in resources.iter().enumerate() {
+            eprintln!("Resource dict {i}:");
+            if let Some(font_val) = dict_get(res, b"Font") {
+                let font_dict = doc.resolve(font_val);
+                if let Some(fd) = font_dict.as_dict() {
+                    for (name, val) in fd.iter() {
+                        let ns = String::from_utf8_lossy(name);
+                        let font = doc.resolve(val);
+                        if let Some(font_d) = font.as_dict() {
+                            let subtype = dict_get(font_d, b"Subtype")
+                                .and_then(|v| v.as_name())
+                                .map(|n| String::from_utf8_lossy(n).to_string())
+                                .unwrap_or_default();
+                            let base_font = dict_get(font_d, b"BaseFont")
+                                .and_then(|v| v.as_name())
+                                .map(|n| String::from_utf8_lossy(n).to_string())
+                                .unwrap_or_default();
+                            let has_enc = dict_get(font_d, b"Encoding").is_some();
+                            let has_tu = dict_get(font_d, b"ToUnicode").is_some();
+                            eprintln!(
+                                "  Font {ns}: subtype={subtype}, base={base_font}, enc={has_enc}, tounicode={has_tu}"
+                            );
+
+                            // Try to decode a test byte through this font
+                            if has_tu
+                                && let Some(tu) = dict_get(font_d, b"ToUnicode")
+                                && let Ok(cmap_data) = doc.stream_data(doc.resolve(tu))
+                                && let Some(cmap) = super::super::cmap::CMap::parse(&cmap_data)
+                            {
+                                            // Try some common byte values, both 1-byte and 2-byte
+                                            for code in [0x41u32, 0x42, 0x61, 0x65, 0x72, 0x73, 0x6C, 0x01, 0x02, 0x03] {
+                                                let result = cmap.lookup(code, 1)
+                                                    .or_else(|| cmap.lookup(code, 2));
+                                                if let Some(unicode) = &result {
+                                                    let s = String::from_utf16_lossy(unicode);
+                                                    eprintln!("    cmap 0x{code:02X} -> {s:?}");
+                                                } else {
+                                                    eprintln!("    cmap 0x{code:02X} -> None");
+                                                }
+                                            }
+                            }
+
+                            if let Some(enc) = dict_get(font_d, b"Encoding") {
+                                let resolved = doc.resolve(enc);
+                                if let Some(n) = resolved.as_name() {
+                                    eprintln!("    enc name: {}", String::from_utf8_lossy(n));
+                                } else if let Some(ed) = resolved.as_dict() {
+                                    let base = dict_get(ed, b"BaseEncoding")
+                                        .and_then(|v| v.as_name());
+                                    let diffs = dict_get(ed, b"Differences")
+                                        .and_then(|v| v.as_array());
+                                    eprintln!(
+                                        "    enc dict: base={:?}, diffs_len={:?}",
+                                        base.map(|b| String::from_utf8_lossy(b).to_string()),
+                                        diffs.map(|d| d.len())
+                                    );
+                                    if let Some(d) = diffs {
+                                        for item in d.iter().take(30) {
+                                            match item {
+                                                PdfVal::Int(n) => eprint!(" {n}"),
+                                                PdfVal::Name(n) => {
+                                                    eprint!(" /{}", String::from_utf8_lossy(n))
+                                                }
+                                                _ => eprint!(" ?"),
+                                            }
+                                        }
+                                        eprintln!();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
