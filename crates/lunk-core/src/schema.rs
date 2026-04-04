@@ -3,7 +3,7 @@ use rusqlite::{params, Connection};
 use crate::errors::Result;
 
 /// Current schema version. Bump this when adding a new migration.
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 /// A schema migration: version number, human description, and migration function.
 struct Migration {
@@ -39,6 +39,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 3,
         description: "Add change tracking tables and triggers for CRDT sync",
         up: migrate_v3,
+    },
+    Migration {
+        version: 4,
+        description: "Add fts5vocab virtual table for topic clustering",
+        up: migrate_v4,
     },
 ];
 
@@ -449,6 +454,17 @@ fn migrate_v3(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migration v4: Add fts5vocab virtual table for topic clustering.
+/// This is a read-only virtual table that exposes term statistics from the
+/// existing FTS5 index. Safe to create in a savepoint.
+fn migrate_v4(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS entries_vocab
+         USING fts5vocab('entries_fts', 'row');",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -561,7 +577,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(title, "Test");
-        assert_eq!(current_version(&conn).unwrap(), 3);
+        assert_eq!(current_version(&conn).unwrap(), SCHEMA_VERSION);
     }
 
     #[test]

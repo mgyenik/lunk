@@ -9,4 +9,5 @@ pub mod repo;
 pub mod schema;
 pub mod search;
 pub mod sync;
+pub mod topics;
 pub mod transport;

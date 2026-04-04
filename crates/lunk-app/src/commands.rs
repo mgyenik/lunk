@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use lunk_core::db::{with_db, with_db_mut, DbPool};
 use lunk_core::models::*;
-use lunk_core::{repo, search, sync};
+use lunk_core::{repo, search, sync, topics};
 
 use crate::SyncNodeCell;
 
@@ -270,4 +270,45 @@ pub async fn trigger_sync(
             },
         })
         .collect())
+}
+
+// --- Topic commands ---
+
+#[tauri::command]
+pub fn get_topics(db: tauri::State<'_, DbPool>) -> Result<Vec<topics::TopicSummary>, String> {
+    with_db(&db, |conn| {
+        let t = topics::compute_topics(conn)?;
+        topics::get_topic_summaries(conn, &t)
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_topic_entries(
+    db: tauri::State<'_, DbPool>,
+    label: String,
+) -> Result<ListResultResponse, String> {
+    with_db(&db, |conn| {
+        let all_topics = topics::compute_topics(conn)?;
+        let topic = all_topics.iter().find(|t| t.label == label);
+        match topic {
+            Some(t) => {
+                let entries = topics::get_entries_by_ids(conn, &t.entry_ids)?;
+                let total = entries.len() as i64;
+                Ok(ListResultResponse { entries, total })
+            }
+            None => Ok(ListResultResponse {
+                entries: vec![],
+                total: 0,
+            }),
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_archive_stats(
+    db: tauri::State<'_, DbPool>,
+) -> Result<topics::ArchiveStats, String> {
+    with_db(&db, topics::get_archive_stats).map_err(|e| e.to_string())
 }

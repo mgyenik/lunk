@@ -62,6 +62,9 @@ pub fn run() {
             commands::add_sync_peer,
             commands::remove_sync_peer,
             commands::trigger_sync,
+            commands::get_topics,
+            commands::get_topic_entries,
+            commands::get_archive_stats,
         ])
         .setup(move |app| {
             // System tray
