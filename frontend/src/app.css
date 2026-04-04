@@ -2,39 +2,76 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Brand colors */
+/* ── Brand tokens ── */
 @theme {
   --color-accent: #863bff;
   --color-accent-hover: #7e14ff;
-  --color-accent-soft: #ede6ff;
+  --color-accent-soft: #f0ebff;
   --color-accent-blue: #47bfff;
+  --color-surface: #fafaf9;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #f5f4f2;
+  --color-border: #e8e5e0;
+  --color-border-subtle: #f0eeeb;
+  --color-text-primary: #1c1917;
+  --color-text-secondary: #78716c;
+  --color-text-tertiary: #a8a29e;
 }
 
 :root {
-  --sidebar-width: 240px;
+  --sidebar-width: 232px;
 }
 
 .dark {
-  --color-accent-soft: rgba(134, 59, 255, 0.12);
+  --color-accent-soft: rgba(134, 59, 255, 0.10);
+  --color-surface: #0c0a09;
+  --color-surface-raised: #1c1917;
+  --color-surface-sunken: #0c0a09;
+  --color-border: #292524;
+  --color-border-subtle: #1c1917;
+  --color-text-primary: #fafaf9;
+  --color-text-secondary: #a8a29e;
+  --color-text-tertiary: #57534e;
+}
+
+/* ── Typography ── */
+@font-face {
+  font-family: 'BrandMono';
+  src: local('JetBrains Mono'), local('SF Mono'), local('Fira Code'), local('Consolas');
+  font-weight: 400 700;
+  font-display: swap;
 }
 
 html, body, #app {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar { width: 5px; }
+/* Monospaced elements */
+.font-brand {
+  font-family: 'BrandMono', 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  letter-spacing: 0.04em;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.25); }
+::-webkit-scrollbar-thumb {
+  background: var(--color-text-tertiary);
+  opacity: 0.3;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
 
-.dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); }
-.dark ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
-
-/* Archive iframe styling */
+/* ── Archive iframe ── */
 .archive-frame {
   border: none;
   width: 100%;
@@ -42,20 +79,39 @@ html, body, #app {
   background: white;
 }
 
-/* Search match highlight */
+/* ── Search highlight ── */
 mark {
   background: #fef08a;
+  color: inherit;
   padding: 0 2px;
   border-radius: 2px;
 }
-
 .dark mark {
-  background: #854d0e;
+  background: rgba(254, 240, 138, 0.2);
   color: #fef08a;
 }
 
-/* Focus ring for keyboard navigation */
+/* ── Entry selection ── */
 .entry-focused {
-  border-left: 2px solid var(--color-accent);
   background: var(--color-accent-soft);
+  box-shadow: inset 2px 0 0 var(--color-accent);
 }
+
+/* ── Noise texture overlay (adds subtle grain) ── */
+.texture-noise::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.015;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+.dark .texture-noise::before {
+  opacity: 0.03;
+}
+
+/* ── Prose (reader mode) ── */
+.prose { max-width: 65ch; }
+.prose h1, .prose h2, .prose h3 { font-weight: 600; }

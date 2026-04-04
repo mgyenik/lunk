@@ -19,20 +19,14 @@
   let iframeEl: HTMLIFrameElement | undefined = $state();
   let tagInput = $state('');
 
-  $effect(() => {
-    loadContent(entry.id);
-  });
+  $effect(() => { loadContent(entry.id); });
 
   async function loadContent(id: string) {
     isLoading = true;
     loadError = '';
     try {
       content = await api.getEntryContent(id);
-      if (!content.snapshot_html) {
-        viewMode = 'reader';
-      } else {
-        viewMode = 'archive';
-      }
+      viewMode = content.snapshot_html ? 'archive' : 'reader';
     } catch (err) {
       loadError = `Failed to load content: ${err}`;
     } finally {
@@ -71,75 +65,61 @@
   }
 
   function handleTagKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      addTag();
-    }
+    if (e.key === 'Enter') { e.preventDefault(); addTag(); }
   }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    if (e.key === 'Escape') {
-      onBack();
-    }
+    if (e.key === 'Escape') onBack();
   }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="flex-1 flex flex-col min-h-0">
+<div class="flex-1 flex flex-col min-h-0 bg-surface">
   <!-- Toolbar -->
-  <div class="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700/50 bg-white dark:bg-gray-900 shrink-0">
+  <div class="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
     <button
-      class="text-sm text-gray-500 dark:text-gray-400 hover:text-accent flex items-center gap-1 transition-colors"
+      class="text-[13px] text-text-secondary hover:text-accent flex items-center gap-1 transition-colors"
       onclick={onBack}
     >
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path d="M15 19l-7-7 7-7" />
       </svg>
-      Back
+      <span class="font-brand text-[11px]">ESC</span>
     </button>
 
     <div class="flex-1"></div>
 
-    <!-- View mode toggle (articles only) -->
     {#if entry.content_type === 'article' && content?.snapshot_html}
-      <div class="flex rounded-md border border-gray-200 dark:border-gray-600 text-xs">
+      <div class="flex rounded-md border border-border text-[11px] overflow-hidden">
         <button
-          class="px-2.5 py-1 rounded-l-md transition-colors
-            {viewMode === 'archive' ? 'bg-accent text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+          class="px-2.5 py-1 transition-colors
+            {viewMode === 'archive' ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-raised'}"
           onclick={() => viewMode = 'archive'}
-        >
-          Archive
-        </button>
+        >Archive</button>
         <button
-          class="px-2.5 py-1 rounded-r-md transition-colors
-            {viewMode === 'reader' ? 'bg-accent text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+          class="px-2.5 py-1 border-l border-border transition-colors
+            {viewMode === 'reader' ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-raised'}"
           onclick={() => viewMode = 'reader'}
-        >
-          Reader
-        </button>
+        >Reader</button>
       </div>
     {/if}
 
-    <!-- Open original -->
     {#if entry.url}
       <a
         href={entry.url}
         target="_blank"
         rel="noopener noreferrer"
-        class="text-xs px-2.5 py-1 rounded-md border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-      >
-        Original
-      </a>
+        class="text-[11px] px-2.5 py-1 rounded-md border border-border text-text-secondary hover:bg-surface-raised transition-colors"
+      >Original</a>
     {/if}
 
-    <!-- Delete with confirmation -->
     <button
-      class="text-xs px-2.5 py-1 rounded-md border transition-colors
+      class="text-[11px] px-2.5 py-1 rounded-md border transition-all duration-200
         {confirmingDelete
           ? 'border-red-400 bg-red-500 text-white hover:bg-red-600'
-          : 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 hover:border-red-200 dark:hover:border-red-800'}"
+          : 'border-border text-text-tertiary hover:text-red-500 hover:border-red-300 dark:hover:border-red-800'}"
       onclick={handleDelete}
     >
       {confirmingDelete ? 'Confirm?' : 'Delete'}
@@ -147,38 +127,31 @@
   </div>
 
   <!-- Entry header -->
-  <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-800/50 bg-gray-50 dark:bg-gray-800/30 shrink-0">
-    <h1 class="text-lg font-semibold text-gray-900 dark:text-gray-100 leading-tight">{entry.title}</h1>
-    <div class="flex items-center gap-3 mt-2 text-xs text-gray-500 dark:text-gray-400">
+  <div class="px-6 py-4 border-b border-border-subtle bg-surface-sunken shrink-0">
+    <h1 class="text-[16px] font-semibold text-text-primary leading-tight">{entry.title}</h1>
+    <div class="flex items-center gap-3 mt-2 font-brand text-[11px] text-text-tertiary">
       {#if entry.domain}
         <span class="flex items-center gap-1.5">
           <img
             src="https://www.google.com/s2/favicons?domain={entry.domain}&sz=16"
             alt=""
-            class="w-3.5 h-3.5 rounded-sm"
+            class="w-3 h-3 rounded-sm"
             onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
           {entry.domain}
         </span>
       {/if}
       <span>{formatDate(entry.created_at)}</span>
-      {#if entry.word_count}
-        <span>{entry.word_count.toLocaleString()} words</span>
-      {/if}
-      {#if entry.page_count}
-        <span>{entry.page_count} pages</span>
-      {/if}
+      {#if entry.word_count}<span>{entry.word_count.toLocaleString()}w</span>{/if}
+      {#if entry.page_count}<span>{entry.page_count}pg</span>{/if}
     </div>
 
     <!-- Tags -->
-    <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+    <div class="flex items-center gap-1.5 mt-2.5 flex-wrap">
       {#each entry.tags as tag}
-        <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-accent-soft text-accent">
-          {tag}
-          <button
-            class="hover:text-accent-hover"
-            onclick={() => removeTag(tag)}
-          >&times;</button>
+        <span class="inline-flex items-center gap-1 text-[11px] px-2 py-[2px] rounded-md bg-accent-soft text-accent font-medium">
+          #{tag}
+          <button class="opacity-50 hover:opacity-100 transition-opacity" onclick={() => removeTag(tag)}>&times;</button>
         </span>
       {/each}
       <input
@@ -186,50 +159,43 @@
         bind:value={tagInput}
         onkeydown={handleTagKeydown}
         placeholder="+ tag"
-        class="text-xs px-2 py-0.5 w-16 bg-transparent border-b border-transparent focus:border-accent/30 outline-none text-gray-500 dark:text-gray-400 placeholder-gray-400 dark:placeholder-gray-600"
+        class="text-[11px] px-1.5 py-[2px] w-14 bg-transparent border-b border-transparent focus:border-accent/30 outline-none text-text-secondary placeholder-text-tertiary"
       />
     </div>
   </div>
 
-  <!-- Content area -->
+  <!-- Content -->
   <div class="flex-1 min-h-0 overflow-hidden">
     {#if isLoading}
-      <div class="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
-        Loading content...
+      <div class="flex items-center justify-center h-full">
+        <div class="w-5 h-5 rounded-full border-2 border-accent/20 border-t-accent animate-spin"></div>
       </div>
     {:else if loadError}
-      <div class="flex flex-col items-center justify-center h-full gap-3 text-sm">
-        <p class="text-red-500 dark:text-red-400">{loadError}</p>
+      <div class="flex flex-col items-center justify-center h-full gap-3">
+        <p class="text-[13px] text-red-500">{loadError}</p>
         <button
-          class="px-3 py-1.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 text-xs"
+          class="px-3 py-1.5 rounded-md bg-surface-raised border border-border text-text-secondary hover:bg-surface-sunken text-[11px] transition-colors"
           onclick={() => loadContent(entry.id)}
-        >
-          Retry
-        </button>
+        >Retry</button>
       </div>
     {:else if entry.content_type === 'pdf' && content?.pdf_base64}
       <PdfView data={content.pdf_base64} {initialPage} />
     {:else if viewMode === 'archive' && content?.snapshot_html}
-      <iframe
-        bind:this={iframeEl}
-        sandbox="allow-same-origin"
-        class="archive-frame"
-        title="Archived page snapshot"
-      ></iframe>
+      <iframe bind:this={iframeEl} sandbox="allow-same-origin" class="archive-frame" title="Archived page snapshot"></iframe>
     {:else if content?.readable_html}
-      <div class="overflow-y-auto h-full bg-white dark:bg-gray-900">
+      <div class="overflow-y-auto h-full bg-surface-raised">
         <article class="max-w-2xl mx-auto px-6 py-8 prose prose-sm prose-gray dark:prose-invert">
           {@html decodeBase64(content.readable_html)}
         </article>
       </div>
     {:else if content?.extracted_text}
-      <div class="overflow-y-auto h-full bg-white dark:bg-gray-900">
-        <div class="max-w-2xl mx-auto px-6 py-8 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+      <div class="overflow-y-auto h-full bg-surface-raised">
+        <div class="max-w-2xl mx-auto px-6 py-8 text-[13px] text-text-secondary whitespace-pre-wrap leading-relaxed">
           {content.extracted_text}
         </div>
       </div>
     {:else}
-      <div class="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
+      <div class="flex items-center justify-center h-full text-text-tertiary text-[13px]">
         No content available
       </div>
     {/if}

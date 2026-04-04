@@ -25,11 +25,8 @@
   function handleInput(e: Event) {
     const target = e.target as HTMLInputElement;
     inputValue = target.value;
-
     if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      onSearch(inputValue);
-    }, 300);
+    debounceTimer = setTimeout(() => { onSearch(inputValue); }, 300);
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -57,17 +54,18 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<div class="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
-  <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-gray-800 border transition-colors
-    {isFocused ? 'border-accent/40 shadow-sm' : 'border-gray-200 dark:border-gray-700'}">
-    <svg class="w-4 h-4 shrink-0 transition-colors {isFocused ? 'text-accent' : 'text-gray-400 dark:text-gray-500'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+<div class="px-4 py-3 bg-surface border-b border-border">
+  <div class="flex items-center gap-2.5 px-3 py-[7px] rounded-lg bg-surface-raised border transition-all duration-200
+    {isFocused ? 'border-accent/30 shadow-[0_0_0_3px_rgba(134,59,255,0.06)]' : 'border-border'}">
+    <svg class="w-[15px] h-[15px] shrink-0 transition-colors duration-200
+      {isFocused ? 'text-accent' : 'text-text-tertiary'}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
       <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
     </svg>
     <input
       bind:this={inputEl}
       type="text"
-      placeholder="Search saved content..."
-      class="flex-1 text-sm outline-none bg-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+      placeholder="Search your archive..."
+      class="flex-1 text-[13px] outline-none bg-transparent text-text-primary placeholder-text-tertiary"
       bind:value={inputValue}
       oninput={handleInput}
       onkeydown={handleKeydown}
@@ -76,7 +74,7 @@
     />
     {#if inputValue}
       <button
-        class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded transition-colors"
+        class="text-text-tertiary hover:text-text-secondary p-0.5 rounded transition-colors"
         onclick={handleClear}
         aria-label="Clear search"
       >
@@ -85,7 +83,7 @@
         </svg>
       </button>
     {:else if !isFocused}
-      <kbd class="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-600 text-gray-400 dark:text-gray-500 font-mono">/</kbd>
+      <kbd class="font-brand text-[10px] px-1.5 py-0.5 rounded border border-border text-text-tertiary">/</kbd>
     {/if}
   </div>
 </div>
