@@ -21,6 +21,7 @@
   let sessionId = $state(crypto.randomUUID());
   let error = $state('');
   let llmStatus = $state<LlmStatus | null>(null);
+  let suggestedQuestions = $state<string[]>([]);
   let messagesEndEl: HTMLDivElement | undefined = $state();
 
   const hasModel = $derived(llmStatus?.model_loaded ?? false);
@@ -29,6 +30,41 @@
     try {
       llmStatus = await api.getLlmStatus();
     } catch { /* ignore */ }
+  }
+
+  async function loadSuggestions() {
+    try {
+      const suggestions: string[] = [];
+      const templates = [
+        (t: string) => `What does "${t}" cover?`,
+        (t: string) => `Summarize "${t}"`,
+        (t: string) => `What are the key points in "${t}"?`,
+      ];
+
+      // Pull from recent entries
+      const recent = await api.listEntries({ limit: 6 });
+      const titles = recent.entries
+        .map(e => e.title)
+        .filter(t => t.length > 10 && t.length < 80);
+
+      for (let i = 0; i < Math.min(2, titles.length); i++) {
+        suggestions.push(templates[i % templates.length](titles[i]));
+      }
+
+      // Pull from top tags
+      const tags = await api.getTags();
+      const topTags = tags.filter(t => t.count >= 2).slice(0, 3);
+      for (const tag of topTags.slice(0, 1)) {
+        suggestions.push(`What have I saved about ${tag.name}?`);
+      }
+
+      // Fallback if we didn't get enough
+      if (suggestions.length === 0) {
+        suggestions.push("What topics does my archive cover?");
+      }
+
+      suggestedQuestions = suggestions;
+    } catch { /* ignore — suggestions are optional */ }
   }
 
   async function sendMessage() {
@@ -119,6 +155,7 @@
   });
 
   loadStatus();
+  loadSuggestions();
 </script>
 
 <div class="flex-1 flex flex-col min-h-0 bg-surface">
@@ -161,11 +198,7 @@
           Ask questions about your saved articles and PDFs. Answers are grounded in your content with source citations.
         </p>
         <div class="flex flex-wrap gap-2 justify-center max-w-md">
-          {#each [
-            "What approaches exist for single-cell impedance?",
-            "Summarize the MP6002 datasheet",
-            "Compare the digital filter papers I've saved",
-          ] as example}
+          {#each suggestedQuestions as example}
             <button
               class="text-[11px] px-3 py-1.5 rounded-lg border border-border-subtle text-text-secondary
                 hover:border-accent/30 hover:text-accent transition-colors text-left"
