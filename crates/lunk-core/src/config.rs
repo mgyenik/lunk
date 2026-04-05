@@ -28,6 +28,8 @@ pub struct Config {
     pub server: ServerConfig,
     pub sync: SyncConfig,
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub llm: LlmConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +49,23 @@ pub struct LoggingConfig {
     pub level: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmConfig {
+    /// Catalog ID of the active model (empty string if none)
+    pub active_model: String,
+    /// Whether to use the LLM for title generation
+    pub title_generation: bool,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            active_model: String::new(),
+            title_generation: true,
+        }
+    }
+}
+
 impl Config {
     /// Default config values for the given profile.
     fn defaults_for(profile: &str) -> Self {
@@ -63,6 +82,7 @@ impl Config {
                 logging: LoggingConfig {
                     level: "debug".to_string(),
                 },
+                llm: LlmConfig::default(),
             },
             _ => Self {
                 server: ServerConfig {
@@ -76,6 +96,7 @@ impl Config {
                 logging: LoggingConfig {
                     level: "info".to_string(),
                 },
+                llm: LlmConfig::default(),
             },
         }
     }
@@ -145,6 +166,20 @@ impl Config {
     pub fn secret_key_path() -> Result<PathBuf> {
         let data_dir = Self::data_dir()?;
         Ok(data_dir.join("secret_key"))
+    }
+
+    /// Save the config to its TOML file.
+    pub fn save(&self) -> Result<()> {
+        let path = Self::config_file_path()?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| LunkError::Config(format!("create config dir: {e}")))?;
+        }
+        let toml_str = toml::to_string_pretty(self)
+            .map_err(|e| LunkError::Config(format!("serialize config: {e}")))?;
+        std::fs::write(&path, toml_str)
+            .map_err(|e| LunkError::Config(format!("write config: {e}")))?;
+        Ok(())
     }
 }
 

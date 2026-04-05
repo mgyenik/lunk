@@ -46,7 +46,9 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
-            pkg-config
+            pkg-config \
+            libclang-dev \
+            cmake
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -90,6 +92,8 @@ jobs:
             librsvg2-dev \
             libssl-dev \
             pkg-config \
+            libclang-dev \
+            cmake \
             file
 
       - uses: dtolnay/rust-toolchain@stable
@@ -128,6 +132,9 @@ jobs:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - uses: oven-sh/setup-bun@v2
+
+      - name: Install build dependencies
+        run: brew install cmake
 
       - name: Install frontend dependencies
         run: cd frontend && bun install --frozen-lockfile

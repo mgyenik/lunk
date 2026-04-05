@@ -32,6 +32,9 @@ pub enum LunkError {
     #[error("transport error: {0}")]
     Transport(String),
 
+    #[error("llm error: {0}")]
+    Llm(String),
+
     #[error("{0}")]
     Other(String),
 }

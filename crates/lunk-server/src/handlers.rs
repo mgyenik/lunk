@@ -213,7 +213,8 @@ async fn create_entry(
             req.extracted_text = full_text;
         }
 
-        let entry = with_db_mut(&state.db, |db| repo::create_pdf_entry(db, req, pages))?;
+        let mut entry = with_db_mut(&state.db, |db| repo::create_pdf_entry(db, req, pages))?;
+        try_llm_title(&state, &mut entry);
         embed_and_extract_keywords(&state, &entry);
         return Ok((StatusCode::CREATED, Json(entry)));
     }
@@ -227,9 +228,45 @@ async fn create_entry(
         }
     }
 
-    let entry = with_db_mut(&state.db, |db| repo::create_entry(db, req))?;
+    let mut entry = with_db_mut(&state.db, |db| repo::create_entry(db, req))?;
+    try_llm_title(&state, &mut entry);
     embed_and_extract_keywords(&state, &entry);
     Ok((StatusCode::CREATED, Json(entry)))
+}
+
+/// Try to improve an entry's title using the LLM. Updates the entry in-place
+/// and in the database. No-op if the LLM is not loaded or the title is already good.
+fn try_llm_title(state: &AppState, entry: &mut Entry) {
+    use lunk_core::llm_titles;
+
+    // Only try for entries with generic/placeholder titles
+    if !lunk_core::pdf::is_generic_title(&entry.title)
+        && !entry.title.is_empty()
+        && entry.url.as_deref() != Some(&entry.title)
+    {
+        return;
+    }
+
+    // Get extracted text for the entry
+    let text = match with_db(&state.db, |conn| {
+        repo::get_entry_content(conn, &entry.id).map(|c| c.extracted_text)
+    }) {
+        Ok(text) if !text.is_empty() => text,
+        _ => return,
+    };
+
+    let template = llm_titles::active_chat_template(&state.llm_engine);
+    if let Some(title) = llm_titles::generate_title(&state.llm_engine, &text, template) {
+        // Update in database
+        if let Err(e) = with_db_mut(&state.db, |db| {
+            repo::update_entry(db, &entry.id, Some(title.as_str()), None).map(|_| ())
+        }) {
+            tracing::warn!(entry_id = %entry.id, "failed to update LLM title: {e}");
+            return;
+        }
+        tracing::info!(entry_id = %entry.id, "LLM title: {title}");
+        entry.title = title;
+    }
 }
 
 /// Generate embedding and extract keywords for a newly created entry.
@@ -546,6 +583,7 @@ mod tests {
         let state = crate::state::AppState {
             db: pool,
             embedding_model: MODEL.clone(),
+            llm_engine: lunk_core::llm_engine::LlmEngine::new().unwrap(),
             sync_node: None,
         };
         crate::build_router(state)

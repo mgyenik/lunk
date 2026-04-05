@@ -301,7 +301,8 @@ pub async fn serve(port: u16) -> Result<()> {
     let pool = db::create_pool(wrapped_db);
 
     let embedding_model = lunk_core::embeddings::EmbeddingModel::new(None)?;
-    let state = lunk_server::state::AppState { db: pool, embedding_model, sync_node: None };
+    let llm_engine = lunk_core::llm_engine::LlmEngine::new()?;
+    let state = lunk_server::state::AppState { db: pool, embedding_model, llm_engine, sync_node: None };
     let router = lunk_server::build_router(state);
 
     let addr = format!("127.0.0.1:{port}");

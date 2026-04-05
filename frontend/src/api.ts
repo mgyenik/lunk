@@ -112,6 +112,34 @@ export interface TagSuggestions {
   popular_tags: string[];
 }
 
+export interface CatalogModel {
+  id: string;
+  name: string;
+  description: string;
+  param_label: string;
+  quant_label: string;
+  size_bytes: number;
+  size_display: string;
+  context_size: number;
+  recommended: boolean;
+  min_ram_mb: number;
+  downloaded: boolean;
+}
+
+export interface LlmStatus {
+  active_model: string | null;
+  model_loaded: boolean;
+  title_generation_enabled: boolean;
+}
+
+export interface DownloadProgressEvent {
+  model_id: string;
+  bytes_downloaded: number;
+  total_bytes: number;
+  phase: 'downloading' | 'verifying' | 'complete' | 'error';
+  error: string | null;
+}
+
 export const api = {
   search(query: string, limit = 50, offset = 0): Promise<SearchResult> {
     return invoke('search_entries', { query, limit, offset });
@@ -197,6 +225,32 @@ export const api = {
 
   triggerBackfill(): Promise<BackfillResult> {
     return invoke('trigger_backfill');
+  },
+
+  // --- LLM Model Management ---
+
+  getModelCatalog(): Promise<CatalogModel[]> {
+    return invoke('get_model_catalog');
+  },
+
+  getLlmStatus(): Promise<LlmStatus> {
+    return invoke('get_llm_status');
+  },
+
+  downloadModel(modelId: string): Promise<void> {
+    return invoke('download_model', { modelId });
+  },
+
+  deleteModel(modelId: string): Promise<void> {
+    return invoke('delete_model', { modelId });
+  },
+
+  activateModel(modelId: string): Promise<void> {
+    return invoke('activate_model', { modelId });
+  },
+
+  setTitleGeneration(enabled: boolean): Promise<void> {
+    return invoke('set_title_generation', { enabled });
   },
 };
 

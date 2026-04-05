@@ -1,4 +1,5 @@
 mod commands;
+mod llm_commands;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -82,11 +83,33 @@ pub fn run() {
     let backfill_pool = pool.clone();
     tracing::info!("embedding model ready");
 
+    // Initialize LLM engine (llama.cpp backend)
+    let llm_engine = lunk_core::llm_engine::LlmEngine::new()
+        .expect("failed to initialize LLM backend");
+
+    // Auto-load the configured active model if it exists on disk
+    if !config.llm.active_model.is_empty()
+        && let Some(entry) = lunk_core::llm_catalog::get_catalog_entry(&config.llm.active_model)
+        && let Ok(path) = lunk_core::llm_models::model_path(entry)
+        && path.exists()
+    {
+        match llm_engine.load_model(&path, &config.llm.active_model) {
+            Ok(()) => tracing::info!("LLM model loaded: {}", config.llm.active_model),
+            Err(e) => tracing::warn!("failed to load LLM model: {e}"),
+        }
+    }
+    let server_llm = llm_engine.clone();
+
+    // Wrap config in Mutex for mutable access from settings commands
+    let config_state = std::sync::Mutex::new(config);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(pool)
         .manage(embedding_model)
+        .manage(llm_engine)
+        .manage(config_state)
         .manage(sync_cell.clone())
         .invoke_handler(tauri::generate_handler![
             commands::search_entries,
@@ -109,6 +132,12 @@ pub fn run() {
             commands::get_similar_entries,
             commands::get_entry_keywords,
             commands::trigger_backfill,
+            llm_commands::get_model_catalog,
+            llm_commands::get_llm_status,
+            llm_commands::download_model,
+            llm_commands::delete_model,
+            llm_commands::activate_model,
+            llm_commands::set_title_generation,
         ])
         .setup(move |app| {
             // System tray
@@ -175,6 +204,7 @@ pub fn run() {
                 let state = AppState {
                     db: server_pool,
                     embedding_model: server_model,
+                    llm_engine: server_llm,
                     sync_node: sync_node.clone(),
                 };
                 let router = lunk_server::build_router(state);

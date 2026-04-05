@@ -8,11 +8,13 @@
   import EntryGrid from './lib/EntryGrid.svelte';
   import EntryView from './lib/EntryView.svelte';
   import SyncPanel from './lib/SyncPanel.svelte';
+  import SettingsPanel from './lib/SettingsPanel.svelte';
+  import WelcomeFlow from './lib/WelcomeFlow.svelte';
   import { api, type Entry, type SearchHit, type TopicSummary, type ArchiveStats, type TagWithCount } from './api';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { open } from '@tauri-apps/plugin-dialog';
 
-  type ViewType = 'home' | 'browse' | 'search' | 'detail' | 'sync';
+  type ViewType = 'home' | 'browse' | 'search' | 'detail' | 'sync' | 'settings';
 
   let currentView = $state<ViewType>('home');
   let entries = $state<(Entry | SearchHit)[]>([]);
@@ -22,6 +24,7 @@
   let searchQuery = $state('');
   let isLoading = $state(false);
   let isDragOver = $state(false);
+  let showWelcome = $state(false);
 
   // Home data
   let topics = $state<TopicSummary[]>([]);
@@ -104,7 +107,7 @@
 
   // --- Navigation handlers ---
 
-  function handleNavigate(view: 'home' | 'sync') {
+  function handleNavigate(view: 'home' | 'sync' | 'settings') {
     currentView = view;
     selectedEntry = null;
     selectedMatchedPage = undefined;
@@ -264,6 +267,13 @@
   });
 
   loadHomeData();
+
+  // Check if we should show the welcome flow (no LLM model configured)
+  api.getLlmStatus().then(status => {
+    if (!status.active_model && !localStorage.getItem('lunk-welcome-dismissed')) {
+      showWelcome = true;
+    }
+  }).catch(() => {}); // Ignore errors — welcome is optional
 </script>
 
 <div class="flex h-full bg-surface relative">
@@ -332,6 +342,12 @@
       />
     {:else if currentView === 'sync'}
       <SyncPanel />
+    {:else if currentView === 'settings'}
+      <SettingsPanel />
     {/if}
   </div>
 </div>
+
+{#if showWelcome}
+  <WelcomeFlow onDismiss={() => { showWelcome = false; }} />
+{/if}

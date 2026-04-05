@@ -23,7 +23,9 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
-            pkg-config
+            pkg-config \
+            libclang-dev \
+            cmake
 
       - uses: dtolnay/rust-toolchain@stable
         with:
