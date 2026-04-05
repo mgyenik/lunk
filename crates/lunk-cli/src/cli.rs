@@ -511,11 +511,6 @@ pub fn llm_retitle(model_id: &str, bad_only: bool, filter_ids: &[String]) -> Res
             continue;
         }
 
-        if extracted_text.len() < 50 {
-            skipped += 1;
-            continue;
-        }
-
         if bad_only && !lunk_core::pdf::is_generic_title(old_title) {
             skipped += 1;
             continue;
