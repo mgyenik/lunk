@@ -154,7 +154,7 @@ All tests use in-memory SQLite databases — no external files, network, or stat
 
 ```bash
 GRYMOIRE_PROFILE=staging grymoire serve
-GRYMOIRE_DATA_DIR=/tmp/grymoire-test lunk serve
+GRYMOIRE_DATA_DIR=/tmp/grymoire-test grymoire serve
 ```
 
 ## Chrome Extension
