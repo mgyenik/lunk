@@ -77,35 +77,40 @@
 </script>
 
 <div class="flex-1 overflow-y-auto p-6 max-w-2xl">
-  <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-6">P2P Sync</h2>
+  <h2 class="text-[16px] font-semibold text-text-primary mb-1">P2P Sync</h2>
+  <p class="text-[12px] text-text-tertiary mb-6">Sync your archive across devices</p>
 
   {#if isLoading}
-    <p class="text-gray-500 dark:text-gray-400">Loading sync status...</p>
+    <div class="flex items-center justify-center py-20">
+      <div class="w-5 h-5 rounded-full border-2 border-accent/20 border-t-accent animate-spin"></div>
+    </div>
   {:else if status}
     <!-- Node info -->
-    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-6">
+    <div class="rounded-lg bg-surface-raised border border-border p-4 mb-6">
       <div class="flex items-center justify-between mb-2">
-        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">This Node</h3>
-        <span class="text-xs px-2 py-0.5 rounded-full {status.sync_available ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'}">
+        <h3 class="text-[13px] font-semibold text-text-primary">This Node</h3>
+        <span class="text-[10px] px-2 py-0.5 rounded-full font-brand {status.sync_available
+          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+          : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'}">
           {status.sync_available ? 'Active' : 'Unavailable'}
         </span>
       </div>
 
       {#if status.node_id}
         <div class="flex items-center gap-2 mt-2">
-          <code class="text-xs bg-white dark:bg-gray-900 px-2 py-1 rounded border border-gray-200 dark:border-gray-700 font-mono flex-1 truncate text-gray-900 dark:text-gray-100">
+          <code class="text-[11px] bg-surface-sunken px-2 py-1 rounded border border-border-subtle font-brand flex-1 truncate text-text-primary">
             {status.node_id}
           </code>
           <button
-            class="text-xs px-2 py-1 rounded bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 transition-colors shrink-0"
+            class="text-[11px] px-2.5 py-1 rounded-md border border-border text-text-secondary hover:bg-surface-raised transition-colors shrink-0"
             onclick={copyNodeId}
           >
             {copied ? 'Copied!' : 'Copy'}
           </button>
         </div>
-        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Share this ID with peers to connect</p>
+        <p class="text-[10px] text-text-tertiary mt-1.5">Share this ID with peers to connect</p>
       {:else}
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+        <p class="text-[12px] text-text-secondary mt-1">
           Sync node is starting...
         </p>
       {/if}
@@ -115,7 +120,7 @@
     {#if status.sync_available}
       <div class="flex items-center gap-3 mb-6">
         <button
-          class="px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm rounded-md hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="px-4 py-2 bg-accent text-white text-[12px] rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           onclick={handleSync}
           disabled={isSyncing || status.peers.length === 0}
         >
@@ -123,9 +128,9 @@
         </button>
 
         {#if syncResults.length > 0}
-          <div class="text-sm">
+          <div class="text-[11px] font-brand">
             {#each syncResults as result}
-              <span class={result.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+              <span class={result.success ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}>
                 {truncateId(result.peer_id)}:
                 {#if result.success}
                   sent {result.sent}, received {result.received}
@@ -142,12 +147,12 @@
     <!-- Peers -->
     <div class="mb-6">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">
+        <h3 class="text-[13px] font-semibold text-text-primary">
           Peers ({status.peers.length})
         </h3>
         {#if status.sync_available}
           <button
-            class="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 transition-colors"
+            class="text-[11px] px-2.5 py-1 rounded-md border border-border text-text-secondary hover:bg-surface-raised transition-colors"
             onclick={() => { showAddForm = !showAddForm; }}
           >
             {showAddForm ? 'Cancel' : '+ Add Peer'}
@@ -156,49 +161,45 @@
       </div>
 
       {#if showAddForm}
-        <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-3">
-          <div class="space-y-2">
-            <input
-              type="text"
-              class="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 font-mono bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-              placeholder="Peer Node ID"
-              bind:value={addPeerId}
-            />
-            <input
-              type="text"
-              class="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-              placeholder="Name (optional)"
-              bind:value={addPeerName}
-            />
-            <button
-              class="px-3 py-1.5 text-sm bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-md hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50"
-              onclick={handleAddPeer}
-              disabled={!addPeerId.trim()}
-            >
-              Add Peer
-            </button>
-          </div>
+        <div class="rounded-lg bg-surface-sunken p-4 mb-3 space-y-2">
+          <input
+            type="text"
+            class="w-full px-3 py-1.5 text-[12px] border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-accent/40 font-brand bg-surface-raised text-text-primary"
+            placeholder="Peer Node ID"
+            bind:value={addPeerId}
+          />
+          <input
+            type="text"
+            class="w-full px-3 py-1.5 text-[12px] border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-accent/40 bg-surface-raised text-text-primary"
+            placeholder="Name (optional)"
+            bind:value={addPeerName}
+          />
+          <button
+            class="px-3 py-1.5 text-[12px] bg-accent text-white rounded-md hover:bg-accent-hover transition-colors disabled:opacity-50"
+            onclick={handleAddPeer}
+            disabled={!addPeerId.trim()}
+          >
+            Add Peer
+          </button>
         </div>
       {/if}
 
       {#if status.peers.length === 0}
-        <p class="text-sm text-gray-500 dark:text-gray-400">
+        <p class="text-[12px] text-text-secondary">
           No peers configured. Add a peer's Node ID to start syncing.
         </p>
       {:else}
         <div class="space-y-2">
           {#each status.peers as peer}
-            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 flex items-start justify-between">
+            <div class="bg-surface-raised border border-border-subtle rounded-lg p-3 flex items-start justify-between">
               <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {peer.name || '(unnamed)'}
-                  </span>
-                </div>
-                <code class="text-xs text-gray-500 dark:text-gray-400 font-mono block truncate mt-0.5">
+                <span class="text-[12px] font-medium text-text-primary">
+                  {peer.name || '(unnamed)'}
+                </span>
+                <code class="text-[10px] text-text-tertiary font-brand block truncate mt-0.5">
                   {peer.id}
                 </code>
-                <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                <div class="text-[10px] text-text-tertiary mt-1 font-brand">
                   {#if peer.last_sync_at}
                     Last sync: {formatDate(peer.last_sync_at)}
                   {:else}
@@ -208,7 +209,7 @@
                 </div>
               </div>
               <button
-                class="text-xs text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors ml-2 shrink-0"
+                class="text-[11px] text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors ml-2 shrink-0"
                 onclick={() => handleRemovePeer(peer.id)}
               >
                 Remove
@@ -221,7 +222,7 @@
   {/if}
 
   {#if error}
-    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-sm text-red-700 dark:text-red-400">
+    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-[12px] text-red-700 dark:text-red-400">
       {error}
     </div>
   {/if}

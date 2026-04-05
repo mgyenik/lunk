@@ -44,7 +44,7 @@
       currentPage = page;
       pageInputValue = String(page);
       isLoading = false;
-      await tick(); // wait for canvas element to mount
+      await tick();
       await renderPage(page);
     } catch (err) {
       console.error('PDF load error:', err);
@@ -142,11 +142,12 @@
 
 <div class="flex flex-col h-full">
   <!-- Toolbar -->
-  <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-xs shrink-0">
+  <div class="flex items-center gap-2 px-3 py-1.5 bg-surface-sunken border-b border-border text-xs shrink-0">
     <button
-      class="px-1.5 py-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-default text-gray-700 dark:text-gray-300"
+      class="px-1.5 py-0.5 rounded hover:bg-surface-raised disabled:opacity-30 disabled:cursor-default text-text-secondary"
       disabled={currentPage <= 1}
       onclick={() => goTo(currentPage - 1)}
+      aria-label="Previous page"
       title="Previous page (Left arrow)"
     >
       &#8249;
@@ -154,43 +155,47 @@
     <div class="flex items-center gap-1">
       <input
         type="text"
-        class="w-10 text-center rounded border border-gray-300 dark:border-gray-600 py-0.5 text-xs bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+        class="w-10 text-center rounded border border-border py-0.5 text-xs bg-surface-raised text-text-primary"
         bind:value={pageInputValue}
         onkeydown={handlePageKeydown}
+        aria-label="Page number"
       />
-      <span class="text-gray-500 dark:text-gray-400">/ {totalPages}</span>
+      <span class="text-text-tertiary font-brand">/ {totalPages}</span>
     </div>
     <button
-      class="px-1.5 py-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-default text-gray-700 dark:text-gray-300"
+      class="px-1.5 py-0.5 rounded hover:bg-surface-raised disabled:opacity-30 disabled:cursor-default text-text-secondary"
       disabled={currentPage >= totalPages}
       onclick={() => goTo(currentPage + 1)}
+      aria-label="Next page"
       title="Next page (Right arrow)"
     >
       &#8250;
     </button>
 
-    <div class="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
+    <div class="w-px h-4 bg-border mx-1"></div>
 
     <button
-      class="px-1.5 py-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 text-gray-700 dark:text-gray-300"
+      class="px-1.5 py-0.5 rounded hover:bg-surface-raised disabled:opacity-30 text-text-secondary"
       disabled={scale <= 0.5}
       onclick={() => zoom(-0.25)}
+      aria-label="Zoom out"
       title="Zoom out (-)"
     >
       &minus;
     </button>
-    <span class="w-12 text-center text-gray-600 dark:text-gray-400">{Math.round(scale * 100)}%</span>
+    <span class="w-12 text-center text-text-tertiary font-brand">{Math.round(scale * 100)}%</span>
     <button
-      class="px-1.5 py-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 text-gray-700 dark:text-gray-300"
+      class="px-1.5 py-0.5 rounded hover:bg-surface-raised disabled:opacity-30 text-text-secondary"
       disabled={scale >= 4}
       onclick={() => zoom(0.25)}
+      aria-label="Zoom in"
       title="Zoom in (+)"
     >
       +
     </button>
 
     <button
-      class="px-2 py-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
+      class="px-2 py-0.5 rounded hover:bg-surface-raised text-text-tertiary"
       onclick={fitWidth}
       title="Fit to width"
     >
@@ -199,14 +204,14 @@
   </div>
 
   <!-- Canvas area -->
-  <div bind:this={scrollEl} class="flex-1 overflow-auto bg-gray-300 dark:bg-gray-700">
+  <div bind:this={scrollEl} class="flex-1 overflow-auto bg-surface-sunken">
     {#if isLoading}
-      <div class="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
-        Loading PDF...
+      <div class="flex items-center justify-center h-full">
+        <div class="w-5 h-5 rounded-full border-2 border-accent/20 border-t-accent animate-spin"></div>
       </div>
     {:else}
       <div class="flex justify-center p-4">
-        <canvas bind:this={canvasEl} class="shadow-lg bg-white"></canvas>
+        <canvas bind:this={canvasEl} class="shadow-lg bg-white dark:bg-white"></canvas>
       </div>
     {/if}
   </div>

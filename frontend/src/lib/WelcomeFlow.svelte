@@ -74,6 +74,10 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+  role="dialog"
+  aria-modal="true"
+  aria-label="Welcome to Grymoire"
+  tabindex="-1"
   onkeydown={(e) => { if (e.key === 'Escape' && step !== 'downloading') handleSkip(); }}>
   <div class="bg-surface rounded-xl shadow-2xl border border-border w-full max-w-lg mx-4 overflow-hidden">
 
