@@ -70,7 +70,7 @@
         {#each [
           { n: '1', title: 'Browser extension', desc: 'Save any page with Alt+S' },
           { n: '2', title: 'Import a PDF', desc: 'Drag & drop or use the + button' },
-          { n: '3', title: 'CLI', desc: 'lunk save <url>' },
+          { n: '3', title: 'CLI', desc: 'grymoire save <url>' },
         ] as step}
           <div class="flex items-start gap-3 p-3 rounded-lg bg-surface-raised border border-border-subtle">
             <span class="font-brand text-accent text-[12px] font-bold mt-px">{step.n}</span>

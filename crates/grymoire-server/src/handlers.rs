@@ -1,0 +1,660 @@
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::{delete, get, post, put};
+use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
+
+use grymoire_core::db::{with_db, with_db_mut};
+use grymoire_core::models::*;
+use grymoire_core::{repo, search};
+
+use crate::state::AppState;
+
+pub fn api_routes() -> Router<AppState> {
+    Router::new()
+        .route("/entries", post(create_entry))
+        .route("/entries", get(list_entries))
+        .route("/entries/{id}", get(get_entry))
+        .route("/entries/{id}", put(update_entry))
+        .route("/entries/{id}", delete(delete_entry))
+        .route("/entries/{id}/content", get(get_entry_content))
+        .route("/entries/{id}/tags", put(update_entry_tags))
+        .route("/entries/{id}/snapshot", put(update_entry_snapshot))
+        .route("/search", get(search_entries))
+        .route("/tags", get(get_tags))
+        .route("/tags/suggestions", get(get_tag_suggestions))
+        .route("/sync/status", get(sync_status))
+        .route("/sync/peers", get(list_sync_peers))
+        .route("/sync/peers", post(add_sync_peer_handler))
+        .route("/sync/peers/{id}", delete(remove_sync_peer_handler))
+        .route("/sync/trigger", post(trigger_sync))
+        .route("/health", get(health))
+}
+
+// --- Request/Response types ---
+
+#[derive(Deserialize)]
+struct CreateEntryBody {
+    url: Option<String>,
+    title: String,
+    content_type: String,
+    extracted_text: String,
+    snapshot_html: Option<String>,   // base64
+    readable_html: Option<String>,   // base64
+    pdf_base64: Option<String>,
+    tags: Option<Vec<String>>,
+    source: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateEntryBody {
+    title: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct UpdateTagsBody {
+    tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateSnapshotBody {
+    snapshot_html: String,        // base64
+    extracted_text: Option<String>,
+    readable_html: Option<String>, // base64
+}
+
+#[derive(Deserialize)]
+struct ListQuery {
+    content_type: Option<String>,
+    tag: Option<String>,
+    domain: Option<String>,
+    sort: Option<String>,
+    order: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: String,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct TagSuggestionsQuery {
+    domain: Option<String>,
+    title: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ListResponse {
+    entries: Vec<Entry>,
+    total: i64,
+    offset: i64,
+    limit: i64,
+}
+
+#[derive(Serialize)]
+struct ContentResponse {
+    entry_id: String,
+    extracted_text: String,
+    snapshot_html: Option<String>,   // base64
+    readable_html: Option<String>,   // base64
+    pdf_base64: Option<String>,
+}
+
+#[derive(Serialize)]
+struct HealthResponse {
+    status: &'static str,
+    version: &'static str,
+}
+
+type ApiResult<T> = std::result::Result<T, ApiError>;
+
+struct ApiError(StatusCode, String);
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        let body = serde_json::json!({ "error": self.1 });
+        (self.0, Json(body)).into_response()
+    }
+}
+
+impl From<grymoire_core::errors::GrymoireError> for ApiError {
+    fn from(err: grymoire_core::errors::GrymoireError) -> Self {
+        match &err {
+            grymoire_core::errors::GrymoireError::NotFound(_) => {
+                ApiError(StatusCode::NOT_FOUND, err.to_string())
+            }
+            grymoire_core::errors::GrymoireError::InvalidInput(_) => {
+                ApiError(StatusCode::BAD_REQUEST, err.to_string())
+            }
+            _ => ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
+        }
+    }
+}
+
+// --- Handlers ---
+
+async fn create_entry(
+    State(state): State<AppState>,
+    Json(body): Json<CreateEntryBody>,
+) -> ApiResult<(StatusCode, Json<Entry>)> {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+
+    let content_type = ContentType::parse(&body.content_type)
+        .ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("invalid content_type: {}", body.content_type)))?;
+
+    let source = match body.source.as_deref() {
+        Some("extension") => SaveSource::Extension,
+        Some("cli") => SaveSource::Cli,
+        _ => SaveSource::Api,
+    };
+
+    let mut req = CreateEntryRequest {
+        url: body.url,
+        title: body.title,
+        content_type,
+        extracted_text: body.extracted_text,
+        snapshot_html: body.snapshot_html.map(|s| engine.decode(s)).transpose()
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid snapshot_html base64: {e}")))?,
+        readable_html: body.readable_html.map(|s| engine.decode(s)).transpose()
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid readable_html base64: {e}")))?,
+        pdf_data: body.pdf_base64.map(|s| engine.decode(s)).transpose()
+            .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid pdf_base64: {e}")))?,
+        tags: body.tags,
+        source,
+    };
+
+    // Check for duplicate URL before creating
+    if let Some(ref url) = req.url {
+        let existing = with_db(&state.db, |conn| repo::entry_exists_by_url(conn, url))?;
+        if let Some(existing_id) = existing {
+            let entry = with_db(&state.db, |conn| repo::get_entry(conn, &existing_id))?;
+            return Ok((StatusCode::OK, Json(entry)));
+        }
+    }
+
+    // For PDFs: extract text server-side if not provided
+    if let (ContentType::Pdf, Some(pdf_data)) = (&content_type, req.pdf_data.as_ref()) {
+        let pages = grymoire_core::pdf::extract_pages(pdf_data);
+        let full_text: String = pages.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n\n");
+
+        if pages.is_empty() {
+            tracing::warn!(
+                url = ?req.url,
+                title = %req.title,
+                "PDF text extraction failed — entry will be saved but not searchable"
+            );
+        }
+
+        // Try to get a good title: PDF metadata > URL filename > provided title
+        let better_title = if grymoire_core::pdf::is_generic_title(&req.title) {
+            grymoire_core::pdf::extract_title(pdf_data)
+                .or_else(|| {
+                    req.url.as_deref()
+                        .and_then(|u| url::Url::parse(u).ok())
+                        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+                        .filter(|f| !f.is_empty() && !grymoire_core::pdf::is_generic_title(f))
+                })
+        } else {
+            None
+        };
+
+        let mut req = req;
+        if let Some(t) = better_title {
+            req.title = t;
+        }
+        if !full_text.is_empty() {
+            req.extracted_text = full_text;
+        }
+
+        let mut entry = with_db_mut(&state.db, |db| repo::create_pdf_entry(db, req, pages))?;
+        try_llm_title(&state, &mut entry);
+        embed_and_extract_keywords(&state, &entry);
+        return Ok((StatusCode::CREATED, Json(entry)));
+    }
+
+    // For articles: use URL page title if title is empty
+    if req.title.is_empty() {
+        if let Some(ref url) = req.url {
+            req.title = url.clone();
+        } else {
+            req.title = "Untitled".to_string();
+        }
+    }
+
+    let mut entry = with_db_mut(&state.db, |db| repo::create_entry(db, req))?;
+    try_llm_title(&state, &mut entry);
+    embed_and_extract_keywords(&state, &entry);
+    Ok((StatusCode::CREATED, Json(entry)))
+}
+
+/// Try to improve an entry's title using the LLM. Updates the entry in-place
+/// and in the database. No-op if the LLM is not loaded or the title is already good.
+fn try_llm_title(state: &AppState, entry: &mut Entry) {
+    use grymoire_core::llm_titles;
+
+    // Only try for entries with generic/placeholder titles
+    if !grymoire_core::pdf::is_generic_title(&entry.title)
+        && !entry.title.is_empty()
+        && entry.url.as_deref() != Some(&entry.title)
+    {
+        return;
+    }
+
+    // Get extracted text for the entry
+    let text = match with_db(&state.db, |conn| {
+        repo::get_entry_content(conn, &entry.id).map(|c| c.extracted_text)
+    }) {
+        Ok(text) if !text.is_empty() => text,
+        _ => return,
+    };
+
+    let template = llm_titles::active_chat_template(&state.llm_engine);
+    if let Some(title) = llm_titles::generate_title(&state.llm_engine, &text, template) {
+        // Update in database
+        if let Err(e) = with_db_mut(&state.db, |db| {
+            repo::update_entry(db, &entry.id, Some(title.as_str()), None).map(|_| ())
+        }) {
+            tracing::warn!(entry_id = %entry.id, "failed to update LLM title: {e}");
+            return;
+        }
+        tracing::info!(entry_id = %entry.id, "LLM title: {title}");
+        entry.title = title;
+    }
+}
+
+/// Generate embedding and extract keywords for a newly created entry.
+/// Logs a warning and continues if this fails — save always succeeds.
+fn embed_and_extract_keywords(state: &AppState, entry: &Entry) {
+    use grymoire_core::{embeddings, keywords};
+    let entry_id = entry.id;
+    if let Err(e) = with_db(&state.db, |conn| {
+        embeddings::embed_entry(conn, &state.embedding_model, &entry_id)?;
+        keywords::extract_and_store(conn, &entry_id)?;
+        Ok(())
+    }) {
+        tracing::warn!(%entry_id, "post-save semantic processing failed: {e}");
+    }
+}
+
+async fn list_entries(
+    State(state): State<AppState>,
+    Query(query): Query<ListQuery>,
+) -> ApiResult<Json<ListResponse>> {
+    let limit = query.limit.unwrap_or(50);
+    let offset = query.offset.unwrap_or(0);
+
+    let params = ListParams {
+        content_type: query.content_type.as_deref().and_then(ContentType::parse),
+        tag: query.tag,
+        domain: query.domain,
+        sort: query.sort,
+        order: query.order,
+        limit: Some(limit),
+        offset: Some(offset),
+    };
+
+    let (entries, total) = with_db(&state.db, |conn| repo::list_entries(conn, &params))?;
+
+    Ok(Json(ListResponse {
+        entries,
+        total,
+        offset,
+        limit,
+    }))
+}
+
+async fn get_entry(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Entry>> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
+    let entry = with_db(&state.db, |conn| repo::get_entry(conn, &uuid))?;
+    Ok(Json(entry))
+}
+
+async fn update_entry(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateEntryBody>,
+) -> ApiResult<Json<Entry>> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
+
+    let entry = with_db_mut(&state.db, |db| {
+        repo::update_entry(db, &uuid, body.title.as_deref(), body.tags.as_deref())
+    })?;
+
+    Ok(Json(entry))
+}
+
+async fn update_entry_tags(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateTagsBody>,
+) -> ApiResult<Json<Entry>> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
+
+    let entry = with_db_mut(&state.db, |db| {
+        repo::update_entry_tags(db, &uuid, &body.tags)
+    })?;
+
+    Ok(Json(entry))
+}
+
+/// Update the snapshot HTML for an entry (used by extension re-archive).
+async fn update_entry_snapshot(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateSnapshotBody>,
+) -> ApiResult<Json<serde_json::Value>> {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
+
+    let snapshot = engine.decode(&body.snapshot_html)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid base64: {e}")))?;
+
+    let extracted_text = body.extracted_text.as_deref();
+    let readable_html = body.readable_html
+        .as_ref()
+        .map(|s| engine.decode(s))
+        .transpose()
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid readable_html base64: {e}")))?;
+
+    with_db_mut(&state.db, |db| {
+        repo::update_entry_content(
+            db,
+            &uuid,
+            extracted_text,
+            Some(&snapshot),
+            readable_html.as_deref(),
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn delete_entry(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
+    with_db_mut(&state.db, |db| repo::delete_entry(db, &uuid))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_entry_content(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ContentResponse>> {
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::STANDARD;
+
+    let uuid = uuid::Uuid::parse_str(&id)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("invalid id: {e}")))?;
+
+    let content = with_db(&state.db, |conn| repo::get_entry_content(conn, &uuid))?;
+
+    Ok(Json(ContentResponse {
+        entry_id: content.entry_id.to_string(),
+        extracted_text: content.extracted_text,
+        snapshot_html: content.snapshot_html.map(|b| engine.encode(b)),
+        readable_html: content.readable_html.map(|b| engine.encode(b)),
+        pdf_base64: content.pdf_data.map(|b| engine.encode(b)),
+    }))
+}
+
+async fn search_entries(
+    State(state): State<AppState>,
+    Query(query): Query<SearchQuery>,
+) -> ApiResult<Json<SearchResult>> {
+    let limit = query.limit.unwrap_or(20);
+    let offset = query.offset.unwrap_or(0);
+
+    let results = with_db(&state.db, |conn| search::search(conn, &query.q, limit, offset))?;
+    Ok(Json(results))
+}
+
+async fn get_tags(
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<TagWithCount>>> {
+    let tags = with_db(&state.db, repo::get_tags)?;
+    Ok(Json(tags))
+}
+
+async fn get_tag_suggestions(
+    State(state): State<AppState>,
+    Query(query): Query<TagSuggestionsQuery>,
+) -> ApiResult<Json<TagSuggestions>> {
+    let title = query.title.as_deref().unwrap_or("");
+    let suggestions = with_db(&state.db, |conn| {
+        repo::get_tag_suggestions(conn, query.domain.as_deref(), title)
+    })?;
+    Ok(Json(suggestions))
+}
+
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok",
+        version: env!("CARGO_PKG_VERSION"),
+    })
+}
+
+// --- Sync handlers ---
+
+#[derive(Serialize)]
+struct SyncStatusResponse {
+    sync_available: bool,
+    node_id: Option<String>,
+    peers: Vec<grymoire_core::models::SyncPeer>,
+}
+
+#[derive(Deserialize)]
+struct AddPeerBody {
+    id: String,
+    name: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SyncTriggerResult {
+    peer_id: String,
+    success: bool,
+    sent: Option<usize>,
+    received: Option<usize>,
+    error: Option<String>,
+}
+
+async fn sync_status(
+    State(state): State<AppState>,
+) -> ApiResult<Json<SyncStatusResponse>> {
+    let node_id = state.sync_node.as_ref().map(|n| n.node_id_string());
+    let peers = with_db(&state.db, grymoire_core::sync::get_sync_peers)?;
+    Ok(Json(SyncStatusResponse {
+        sync_available: state.sync_node.is_some(),
+        node_id,
+        peers,
+    }))
+}
+
+async fn list_sync_peers(
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<grymoire_core::models::SyncPeer>>> {
+    let peers = with_db(&state.db, grymoire_core::sync::get_sync_peers)?;
+    Ok(Json(peers))
+}
+
+async fn add_sync_peer_handler(
+    State(state): State<AppState>,
+    Json(body): Json<AddPeerBody>,
+) -> ApiResult<StatusCode> {
+    with_db(&state.db, |conn| {
+        grymoire_core::sync::add_sync_peer(conn, &body.id, body.name.as_deref())
+    })?;
+    Ok(StatusCode::CREATED)
+}
+
+async fn remove_sync_peer_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    with_db(&state.db, |conn| grymoire_core::sync::remove_sync_peer(conn, &id))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn trigger_sync(
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<SyncTriggerResult>>> {
+    let node = state
+        .sync_node
+        .as_ref()
+        .ok_or(ApiError(StatusCode::SERVICE_UNAVAILABLE, "sync not available".into()))?;
+
+    let results = node.sync_all().await;
+
+    let response: Vec<SyncTriggerResult> = results
+        .into_iter()
+        .map(|(peer_id, result)| match result {
+            Ok(report) => SyncTriggerResult {
+                peer_id,
+                success: true,
+                sent: Some(report.sent),
+                received: Some(report.received),
+                error: None,
+            },
+            Err(e) => SyncTriggerResult {
+                peer_id,
+                success: false,
+                sent: None,
+                received: None,
+                error: Some(e),
+            },
+        })
+        .collect();
+
+    Ok(Json(response))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode as SC};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    use grymoire_core::db;
+    use grymoire_core::embeddings::EmbeddingModel;
+
+    use std::sync::LazyLock;
+
+    // Shared model instance across all tests (loaded once).
+    // Falls back to project root cache or downloads on first run.
+    static MODEL: LazyLock<EmbeddingModel> = LazyLock::new(|| {
+        // Try project root cache first (where build.rs puts it)
+        let candidates = [
+            std::path::PathBuf::from("../../.fastembed_cache"),
+            std::path::PathBuf::from(".fastembed_cache"),
+        ];
+        for dir in &candidates {
+            if dir.exists()
+                && let Ok(m) = EmbeddingModel::new(Some(dir))
+            {
+                return m;
+            }
+        }
+        EmbeddingModel::new(None).expect("embedding model required for server tests")
+    });
+
+    fn test_app() -> Router {
+        let db = db::open_in_memory_db().unwrap();
+        let pool = db::create_pool(db);
+        let state = crate::state::AppState {
+            db: pool,
+            embedding_model: MODEL.clone(),
+            llm_engine: grymoire_core::llm_engine::LlmEngine::new().unwrap(),
+            sync_node: None,
+        };
+        crate::build_router(state)
+    }
+
+    async fn get_json(app: &Router, path: &str) -> (SC, serde_json::Value) {
+        let req = Request::get(path).body(Body::empty()).unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        (status, json)
+    }
+
+    #[tokio::test]
+    async fn test_list_entries_empty() {
+        let app = test_app();
+        let (status, json) = get_json(&app, "/api/v1/entries").await;
+        assert_eq!(status, SC::OK);
+        assert_eq!(json["total"], 0);
+        assert!(json["entries"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_search_empty() {
+        let app = test_app();
+        let (status, json) = get_json(&app, "/api/v1/search?q=test").await;
+        assert_eq!(status, SC::OK);
+        assert_eq!(json["total"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_nonexistent_entry() {
+        let app = test_app();
+        let (status, _) = get_json(&app, "/api/v1/entries/019aaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").await;
+        assert_eq!(status, SC::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_get_tags_empty() {
+        let app = test_app();
+        let (status, json) = get_json(&app, "/api/v1/tags").await;
+        assert_eq!(status, SC::OK);
+        assert!(json.as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_and_get_entry() {
+        let app = test_app();
+
+        let body = serde_json::json!({
+            "url": "https://example.com/test",
+            "title": "Test Article",
+            "content_type": "article",
+            "extracted_text": "This is a test article about Rust programming."
+        });
+
+        let req = Request::post("/api/v1/entries")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), SC::CREATED);
+
+        let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+        let entry: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        let id = entry["id"].as_str().unwrap();
+
+        // Verify we can GET it back
+        let (status, got) = get_json(&app, &format!("/api/v1/entries/{id}")).await;
+        assert_eq!(status, SC::OK);
+        assert_eq!(got["title"], "Test Article");
+    }
+}

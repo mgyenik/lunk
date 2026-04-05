@@ -32,24 +32,24 @@ Local-first. No cloud accounts, no servers, no API keys. Your data stays on your
 
 **Linux / macOS:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mgyenik/lunk/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mgyenik/grymoire/main/scripts/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/mgyenik/lunk/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/mgyenik/grymoire/main/scripts/install.ps1 | iex
 ```
 
-**Desktop App:** `.deb`, `.AppImage`, `.dmg` (universal), `.msi`, and `.exe` builds are on the [GitHub Releases](https://github.com/mgyenik/lunk/releases) page.
+**Desktop App:** `.deb`, `.AppImage`, `.dmg` (universal), `.msi`, and `.exe` builds are on the [GitHub Releases](https://github.com/mgyenik/grymoire/releases) page.
 
 ## Architecture
 
 ```
 crates/
-  lunk-core/       Shared library: DB, models, search, PDF parser, embeddings, sync
-  lunk-server/     HTTP API (axum) on 127.0.0.1:9723
-  lunk-cli/        CLI binary + native messaging host
-  lunk-app/        Tauri v2 desktop app
+  grymoire-core/       Shared library: DB, models, search, PDF parser, embeddings, sync
+  grymoire-server/     HTTP API (axum) on 127.0.0.1:9723
+  grymoire-cli/        CLI binary + native messaging host
+  grymoire-app/        Tauri v2 desktop app
 frontend/          Svelte 5 + TypeScript + Vite 8 + Tailwind CSS 4
 extension/         Chrome extension (Manifest V3)
 docs/              Design documents
@@ -90,8 +90,8 @@ Navigation via a 52px icon rail. Dark mode. Keyboard shortcuts: `/` to search, `
 
 ```bash
 # Save a URL
-lunk save https://example.com
-lunk save https://example.com --tag rust --tag async
+grymoire save https://example.com
+grymoire save https://example.com --tag rust --tag async
 
 # Import a local PDF
 lunk import paper.pdf
@@ -134,11 +134,11 @@ lunk serve --port 8080
 
 ### Testing
 
-167 hermetic tests across lunk-core and lunk-server:
+167 hermetic tests across grymoire-core and grymoire-server:
 
 ```bash
-cargo test -p lunk-core      # 162 tests
-cargo test -p lunk-server    # 5 tests (HTTP handler smoke tests)
+cargo test -p grymoire-core      # 162 tests
+cargo test -p grymoire-server    # 5 tests (HTTP handler smoke tests)
 cargo clippy --all-targets -- -D warnings
 ```
 
@@ -148,13 +148,13 @@ All tests use in-memory SQLite databases — no external files, network, or stat
 
 | Profile   | DB location                                    | API port |
 |-----------|------------------------------------------------|----------|
-| `default` | `~/.local/share/lunk/lunk.db`                  | 9723     |
-| `dev`     | `~/.local/share/lunk/profiles/dev/lunk.db`     | 9724     |
-| custom    | `~/.local/share/lunk/profiles/<name>/lunk.db`  | 9723     |
+| `default` | `~/.local/share/grymoire/grymoire.db`                  | 9723     |
+| `dev`     | `~/.local/share/grymoire/profiles/dev/grymoire.db`     | 9724     |
+| custom    | `~/.local/share/grymoire/profiles/<name>/grymoire.db`  | 9723     |
 
 ```bash
-LUNK_PROFILE=staging lunk serve
-LUNK_DATA_DIR=/tmp/lunk-test lunk serve
+GRYMOIRE_PROFILE=staging lunk serve
+GRYMOIRE_DATA_DIR=/tmp/lunk-test lunk serve
 ```
 
 ## Chrome Extension

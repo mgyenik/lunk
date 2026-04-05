@@ -17,20 +17,20 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: lunk-linux-x86_64
-            binary: target/x86_64-unknown-linux-gnu/release/lunk
+            artifact: grymoire-linux-x86_64
+            binary: target/x86_64-unknown-linux-gnu/release/grymoire
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: lunk-windows-x86_64.exe
-            binary: target/x86_64-pc-windows-msvc/release/lunk.exe
+            artifact: grymoire-windows-x86_64.exe
+            binary: target/x86_64-pc-windows-msvc/release/grymoire.exe
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: lunk-darwin-aarch64
-            binary: target/aarch64-apple-darwin/release/lunk
+            artifact: grymoire-darwin-aarch64
+            binary: target/aarch64-apple-darwin/release/grymoire
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: lunk-darwin-x86_64
-            binary: target/x86_64-apple-darwin/release/lunk
+            artifact: grymoire-darwin-x86_64
+            binary: target/x86_64-apple-darwin/release/grymoire
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -64,7 +64,7 @@ jobs:
         run: cd frontend && bun install --frozen-lockfile
 
       - name: Build CLI
-        run: cargo build --release -p lunk-cli --target ${{ matrix.target }}
+        run: cargo build --release -p grymoire-cli --target ${{ matrix.target }}
 
       - name: Strip binary (Linux/macOS)
         if: runner.os != 'Windows'
@@ -107,19 +107,19 @@ jobs:
         run: cargo install tauri-cli --version "^2" --locked
 
       - name: Build Tauri app
-        run: cd crates/lunk-app && cargo tauri build
+        run: cd crates/grymoire-app && cargo tauri build
 
       - name: Upload deb
         uses: actions/upload-artifact@v7
         with:
-          name: lunk-linux-deb
+          name: grymoire-linux-deb
           path: target/release/bundle/deb/*.deb
           retention-days: 1
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v7
         with:
-          name: lunk-linux-appimage
+          name: grymoire-linux-appimage
           path: target/release/bundle/appimage/*.AppImage
           retention-days: 1
 
@@ -143,12 +143,12 @@ jobs:
         run: cargo install tauri-cli --version "^2" --locked
 
       - name: Build Tauri app (universal binary)
-        run: cd crates/lunk-app && cargo tauri build --target universal-apple-darwin
+        run: cd crates/grymoire-app && cargo tauri build --target universal-apple-darwin
 
       - name: Upload dmg
         uses: actions/upload-artifact@v7
         with:
-          name: lunk-macos-dmg
+          name: grymoire-macos-dmg
           path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
           retention-days: 1
 
@@ -167,19 +167,19 @@ jobs:
         run: cargo install tauri-cli --version "^2" --locked
 
       - name: Build Tauri app
-        run: cd crates/lunk-app && cargo tauri build
+        run: cd crates/grymoire-app && cargo tauri build
 
       - name: Upload MSI
         uses: actions/upload-artifact@v7
         with:
-          name: lunk-windows-msi
+          name: grymoire-windows-msi
           path: target/release/bundle/msi/*.msi
           retention-days: 1
 
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v7
         with:
-          name: lunk-windows-nsis
+          name: grymoire-windows-nsis
           path: target/release/bundle/nsis/*.exe
           retention-days: 1
 
@@ -192,13 +192,13 @@ jobs:
         run: |
           mkdir -p artifacts
           cd extension
-          zip -r ../artifacts/lunk-extension.zip . -x "*.git*"
+          zip -r ../artifacts/grymoire-extension.zip . -x "*.git*"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: lunk-extension
-          path: artifacts/lunk-extension.zip
+          name: grymoire-extension
+          path: artifacts/grymoire-extension.zip
           retention-days: 1
 
   release:
@@ -216,18 +216,18 @@ jobs:
         run: |
           mkdir -p release
           # CLI binaries
-          cp artifacts/lunk-linux-x86_64/lunk release/lunk-linux-x86_64
-          cp artifacts/lunk-windows-x86_64.exe/lunk.exe release/lunk-windows-x86_64.exe
-          cp artifacts/lunk-darwin-aarch64/lunk release/lunk-darwin-aarch64
-          cp artifacts/lunk-darwin-x86_64/lunk release/lunk-darwin-x86_64
+          cp artifacts/grymoire-linux-x86_64/lunk release/grymoire-linux-x86_64
+          cp artifacts/grymoire-windows-x86_64.exe/grymoire.exe release/grymoire-windows-x86_64.exe
+          cp artifacts/grymoire-darwin-aarch64/lunk release/grymoire-darwin-aarch64
+          cp artifacts/grymoire-darwin-x86_64/lunk release/grymoire-darwin-x86_64
           # Desktop app bundles
-          cp artifacts/lunk-linux-deb/*.deb release/ 2>/dev/null || true
-          cp artifacts/lunk-linux-appimage/*.AppImage release/ 2>/dev/null || true
-          cp artifacts/lunk-macos-dmg/*.dmg release/ 2>/dev/null || true
-          cp artifacts/lunk-windows-msi/*.msi release/ 2>/dev/null || true
-          cp artifacts/lunk-windows-nsis/*.exe release/ 2>/dev/null || true
+          cp artifacts/grymoire-linux-deb/*.deb release/ 2>/dev/null || true
+          cp artifacts/grymoire-linux-appimage/*.AppImage release/ 2>/dev/null || true
+          cp artifacts/grymoire-macos-dmg/*.dmg release/ 2>/dev/null || true
+          cp artifacts/grymoire-windows-msi/*.msi release/ 2>/dev/null || true
+          cp artifacts/grymoire-windows-nsis/*.exe release/ 2>/dev/null || true
           # Extension
-          cp artifacts/lunk-extension/lunk-extension.zip release/
+          cp artifacts/grymoire-extension/grymoire-extension.zip release/
           ls -la release/
 
       # NOTE: softprops/action-gh-release v2 is still on node20 as of April 2026.
@@ -242,12 +242,12 @@ jobs:
 
             ### CLI (Linux/macOS)
             ```
-            curl -fsSL https://raw.githubusercontent.com/mgyenik/lunk/main/scripts/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/mgyenik/grymoire/main/scripts/install.sh | bash
             ```
 
             ### CLI (Windows PowerShell)
             ```
-            irm https://raw.githubusercontent.com/mgyenik/lunk/main/scripts/install.ps1 | iex
+            irm https://raw.githubusercontent.com/mgyenik/grymoire/main/scripts/install.ps1 | iex
             ```
 
             ### Desktop App
@@ -259,4 +259,4 @@ jobs:
             > **macOS note**: The app is not code-signed. On first launch, right-click the app → Open → confirm.
 
             ### Chrome Extension
-            Download `lunk-extension.zip`, unzip, then load as an unpacked extension in `chrome://extensions`.
+            Download `grymoire-extension.zip`, unzip, then load as an unpacked extension in `chrome://extensions`.

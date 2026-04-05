@@ -155,7 +155,7 @@ The ONNX model file (~22MB) is downloaded at build time and bundled as a Tauri r
 
 The ONNX model ships with the app binary — no runtime downloads.
 
-### Build Time (`crates/lunk-app/build.rs`)
+### Build Time (`crates/grymoire-app/build.rs`)
 
 The build script downloads 5 files from Hugging Face if not already cached locally:
 
@@ -167,7 +167,7 @@ The build script downloads 5 files from Hugging Face if not already cached local
 | `special_tokens_map.json` | ~125B | Special token definitions |
 | `tokenizer_config.json` | ~366B | Tokenizer settings |
 
-Files are downloaded to `crates/lunk-app/models/all-MiniLM-L6-v2/` and cached between builds. The `cargo:rerun-if-changed=models/` directive ensures the build script only runs when the directory changes.
+Files are downloaded to `crates/grymoire-app/models/all-MiniLM-L6-v2/` and cached between builds. The `cargo:rerun-if-changed=models/` directive ensures the build script only runs when the directory changes.
 
 ### Bundle Configuration (`tauri.conf.json`)
 
@@ -177,11 +177,11 @@ Files are downloaded to `crates/lunk-app/models/all-MiniLM-L6-v2/` and cached be
 
 This copies all model files into the Tauri app bundle's resource directory.
 
-### Runtime Loading (`lunk-app/src/lib.rs`)
+### Runtime Loading (`grymoire-app/src/lib.rs`)
 
 At startup, the app resolves the model directory from the executable path:
-- **Production**: relative to the binary (platform-specific: `models/`, `../Resources/models/`, `../lib/lunk-app/models/`)
-- **Dev mode**: `crates/lunk-app/models/all-MiniLM-L6-v2/` (build.rs output)
+- **Production**: relative to the binary (platform-specific: `models/`, `../Resources/models/`, `../lib/grymoire-app/models/`)
+- **Dev mode**: `crates/grymoire-app/models/all-MiniLM-L6-v2/` (build.rs output)
 - **Fallback**: if bundled files aren't found, downloads via fastembed's default cache (for dev/testing)
 
 The model is loaded via `EmbeddingModel::from_dir()` which uses fastembed's `UserDefinedEmbeddingModel` API — reads the 5 files as raw bytes and constructs the model in memory. This bypasses HuggingFace Hub's cache system entirely, avoiding symlink issues on Windows and read-only filesystem issues in app bundles.

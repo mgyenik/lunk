@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Lunk",
+  "name": "Grymoire",
   "version": "0.2.0",
   "description": "Save, archive, and search web content",
   "permissions": [

@@ -39,7 +39,7 @@ jobs:
         run: cd frontend && bun install --frozen-lockfile
 
       - name: Run tests
-        run: cargo test -p lunk-core -p lunk-server
+        run: cargo test -p grymoire-core -p grymoire-server
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings

@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "crates/lunk-core",
-    "crates/lunk-server",
-    "crates/lunk-cli",
-    "crates/lunk-app",
+    "crates/grymoire-core",
+    "crates/grymoire-server",
+    "crates/grymoire-cli",
+    "crates/grymoire-app",
 ]
 resolver = "2"
 

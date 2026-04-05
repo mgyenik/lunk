@@ -50,7 +50,7 @@
   }
 
   function handleSkip() {
-    localStorage.setItem('lunk-welcome-dismissed', '1');
+    localStorage.setItem('grymoire-welcome-dismissed', '1');
     onDismiss();
   }
 
@@ -85,9 +85,9 @@
             <path d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
           </svg>
         </div>
-        <h2 class="text-[18px] font-semibold text-text-primary mb-2">Welcome to Lunk</h2>
+        <h2 class="text-[18px] font-semibold text-text-primary mb-2">Welcome to Grymoire</h2>
         <p class="text-[13px] text-text-secondary leading-relaxed max-w-sm mx-auto">
-          Lunk uses a local AI model to generate titles for your saved articles and PDFs.
+          Grymoire uses a local AI model to generate titles for your saved articles and PDFs.
           Choose a model to get started — everything runs on your machine, nothing leaves your device.
         </p>
         <div class="mt-6 flex flex-col gap-2">

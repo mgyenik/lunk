@@ -269,7 +269,7 @@
 
   // Check if we should show the welcome flow (no LLM model configured)
   api.getLlmStatus().then(status => {
-    if (!status.active_model && !localStorage.getItem('lunk-welcome-dismissed')) {
+    if (!status.active_model && !localStorage.getItem('grymoire-welcome-dismissed')) {
       showWelcome = true;
     }
   }).catch(() => {}); // Ignore errors — welcome is optional

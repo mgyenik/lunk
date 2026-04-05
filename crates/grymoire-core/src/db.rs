@@ -1,0 +1,304 @@
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+use rusqlite::Connection;
+
+use crate::errors::{GrymoireError, Result};
+use crate::hlc::HybridClock;
+use crate::schema;
+
+/// Database handle with integrated HLC and version counter.
+///
+/// Wraps a SQLite connection with the state needed for change tracking:
+/// a Hybrid Logical Clock for timestamps and a monotonic db_version counter.
+pub struct Db {
+    conn: Connection,
+    hlc: HybridClock,
+    db_version: i64,
+}
+
+impl std::fmt::Debug for Db {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Db")
+            .field("db_version", &self.db_version)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Db {
+    /// Wrap a connection with default (uninitialized) sync state.
+    /// Used for databases that haven't been migrated to v3 yet,
+    /// or for in-memory test databases.
+    pub fn new(conn: Connection) -> Self {
+        Self {
+            conn,
+            hlc: HybridClock::new(String::new()),
+            db_version: 0,
+        }
+    }
+
+    /// Wrap a connection with restored sync state from sync_meta.
+    pub fn with_sync_state(conn: Connection, hlc: HybridClock, db_version: i64) -> Self {
+        Self {
+            conn,
+            hlc,
+            db_version,
+        }
+    }
+
+    pub fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
+    pub fn hlc(&self) -> &HybridClock {
+        &self.hlc
+    }
+
+    pub fn hlc_mut(&mut self) -> &mut HybridClock {
+        &mut self.hlc
+    }
+
+    pub fn db_version(&self) -> i64 {
+        self.db_version
+    }
+
+    /// Bump and return the next db_version (monotonic counter for sync).
+    pub fn next_version(&mut self) -> i64 {
+        self.db_version += 1;
+        self.db_version
+    }
+
+    /// Generate a new HLC timestamp and bump db_version in one call.
+    pub fn next_timestamp(&mut self) -> (crate::hlc::HlcTimestamp, i64) {
+        let ts = self.hlc.now();
+        let ver = self.next_version();
+        (ts, ver)
+    }
+}
+
+pub type DbPool = Arc<Mutex<Db>>;
+
+pub fn open_database(path: &Path) -> Result<Connection> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let conn = Connection::open(path)?;
+    schema::run_migrations(&conn)?;
+
+    Ok(conn)
+}
+
+pub fn open_in_memory() -> Result<Connection> {
+    let conn = Connection::open_in_memory()?;
+    schema::run_migrations(&conn)?;
+    Ok(conn)
+}
+
+/// Open a database and wrap it in a Db with sync state.
+pub fn open_db(path: &Path) -> Result<Db> {
+    let conn = open_database(path)?;
+    let db = load_sync_state(conn)?;
+    Ok(db)
+}
+
+/// Open an in-memory database wrapped in Db (for tests).
+pub fn open_in_memory_db() -> Result<Db> {
+    let conn = open_in_memory()?;
+    let db = load_sync_state(conn)?;
+    Ok(db)
+}
+
+/// Load sync state (site_id, db_version, HLC) from sync_meta if it exists.
+fn load_sync_state(conn: Connection) -> Result<Db> {
+    // Check if sync_meta table exists (only after migration v3)
+    let has_sync_meta: bool = conn
+        .query_row(
+            "SELECT count(*) > 0 FROM sqlite_master WHERE type='table' AND name='sync_meta'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+
+    if !has_sync_meta {
+        return Ok(Db::new(conn));
+    }
+
+    let site_id: String = conn
+        .query_row(
+            "SELECT value FROM sync_meta WHERE key = 'site_id'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_default();
+
+    let db_version: i64 = conn
+        .query_row(
+            "SELECT value FROM sync_meta WHERE key = 'db_version'",
+            [],
+            |row| {
+                let s: String = row.get(0)?;
+                Ok(s.parse::<i64>().unwrap_or(0))
+            },
+        )
+        .unwrap_or(0);
+
+    let hlc_wall: i64 = conn
+        .query_row(
+            "SELECT value FROM sync_meta WHERE key = 'hlc_wall_ms'",
+            [],
+            |row| {
+                let s: String = row.get(0)?;
+                Ok(s.parse::<i64>().unwrap_or(0))
+            },
+        )
+        .unwrap_or(0);
+
+    let hlc_counter: i64 = conn
+        .query_row(
+            "SELECT value FROM sync_meta WHERE key = 'hlc_counter'",
+            [],
+            |row| {
+                let s: String = row.get(0)?;
+                Ok(s.parse::<i64>().unwrap_or(0))
+            },
+        )
+        .unwrap_or(0);
+
+    let hlc = HybridClock::restore(site_id, hlc_wall, hlc_counter);
+    Ok(Db::with_sync_state(conn, hlc, db_version))
+}
+
+/// Persist sync state back to sync_meta. Call before closing.
+pub fn save_sync_state(db: &Db) -> Result<()> {
+    let has_sync_meta: bool = db
+        .conn()
+        .query_row(
+            "SELECT count(*) > 0 FROM sqlite_master WHERE type='table' AND name='sync_meta'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+
+    if !has_sync_meta {
+        return Ok(());
+    }
+
+    db.conn().execute(
+        "UPDATE sync_meta SET value = ?1 WHERE key = 'db_version'",
+        [db.db_version().to_string()],
+    )?;
+    db.conn().execute(
+        "UPDATE sync_meta SET value = ?1 WHERE key = 'hlc_wall_ms'",
+        [db.hlc().wall_ms().to_string()],
+    )?;
+    db.conn().execute(
+        "UPDATE sync_meta SET value = ?1 WHERE key = 'hlc_counter'",
+        [db.hlc().counter().to_string()],
+    )?;
+
+    Ok(())
+}
+
+pub fn create_pool(db: Db) -> DbPool {
+    Arc::new(Mutex::new(db))
+}
+
+/// Read-only access to the database connection.
+pub fn with_db<F, T>(pool: &DbPool, f: F) -> Result<T>
+where
+    F: FnOnce(&Connection) -> Result<T>,
+{
+    let db = pool
+        .lock()
+        .map_err(|e| GrymoireError::Other(format!("db lock poisoned: {e}")))?;
+    f(db.conn())
+}
+
+/// Mutable access to the Db (connection + HLC + version counter).
+/// Use this for all write operations.
+pub fn with_db_mut<F, T>(pool: &DbPool, f: F) -> Result<T>
+where
+    F: FnOnce(&mut Db) -> Result<T>,
+{
+    let mut db = pool
+        .lock()
+        .map_err(|e| GrymoireError::Other(format!("db lock poisoned: {e}")))?;
+    f(&mut db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_open_in_memory_db() {
+        let db = open_in_memory_db().unwrap();
+        // Should have tables created by migrations
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table'", [], |r| r.get(0))
+            .unwrap();
+        assert!(count > 5, "should have created tables via migrations");
+    }
+
+    #[test]
+    fn test_db_version_non_negative() {
+        let db = open_in_memory_db().unwrap();
+        assert!(db.db_version() >= 0);
+    }
+
+    #[test]
+    fn test_db_next_version_increments() {
+        let mut db = open_in_memory_db().unwrap();
+        let base = db.db_version();
+        let v1 = db.next_version();
+        let v2 = db.next_version();
+        assert_eq!(v1, base + 1);
+        assert_eq!(v2, base + 2);
+    }
+
+    #[test]
+    fn test_db_pool_with_db() {
+        let db = open_in_memory_db().unwrap();
+        let pool = create_pool(db);
+
+        let result = with_db(&pool, |conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM entries", [], |r| r.get(0),
+            )?;
+            Ok(count)
+        })
+        .unwrap();
+
+        assert_eq!(result, 0); // empty database
+    }
+
+    #[test]
+    fn test_db_pool_with_db_mut() {
+        let db = open_in_memory_db().unwrap();
+        let pool = create_pool(db);
+
+        let base = with_db(&pool, |conn| {
+            let v: i64 = conn.query_row("SELECT COALESCE((SELECT value FROM sync_meta WHERE key = 'db_version'), '0')", [], |r| {
+                let s: String = r.get(0)?;
+                Ok(s.parse::<i64>().unwrap_or(0))
+            })?;
+            Ok(v)
+        }).unwrap();
+
+        let version = with_db_mut(&pool, |db| Ok(db.next_version())).unwrap();
+        assert_eq!(version, base + 1);
+    }
+
+    #[test]
+    fn test_hlc_integration() {
+        let mut db = open_in_memory_db().unwrap();
+        let (ts1, v1) = db.next_timestamp();
+        let (ts2, v2) = db.next_timestamp();
+        // Timestamps should be monotonically increasing
+        assert!(ts2 > ts1);
+        assert_eq!(v2, v1 + 1);
+    }
+}
+
