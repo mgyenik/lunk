@@ -2,7 +2,7 @@
 
 ## Motivation
 
-Lunk archives web articles and PDFs, extracts their text, and indexes it for full-text search via SQLite FTS5. This works well for keyword lookup — if you remember a specific term, you can find it. But a personal knowledge base needs more:
+Grymoire archives web articles and PDFs, extracts their text, and indexes it for full-text search via SQLite FTS5. This works well for keyword lookup — if you remember a specific term, you can find it. But a personal knowledge base needs more:
 
 **What doesn't work today:**
 - **Topic discovery**: The current approach extracts term frequencies from the FTS5 vocabulary and clusters by shared terms. This produces gibberish labels (`absenc / addendum / afford`) because Porter-stemmed terms, PDF extraction artifacts, and word-frequency statistics don't capture meaning.

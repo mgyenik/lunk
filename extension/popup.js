@@ -48,14 +48,14 @@ async function checkConnection() {
 
     if (response?.success) {
       $("#connectionDot").classList.add("connected");
-      $("#connectionDot").title = "Connected to Lunk";
+      $("#connectionDot").title = "Connected to Grymoire";
     } else {
       $("#connectionDot").classList.add("disconnected");
-      $("#connectionDot").title = "Not connected to Lunk";
+      $("#connectionDot").title = "Not connected to Grymoire";
     }
   } catch {
     $("#connectionDot").classList.add("disconnected");
-    $("#connectionDot").title = "Not connected to Lunk";
+    $("#connectionDot").title = "Not connected to Grymoire";
   }
 }
 

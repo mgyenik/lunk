@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Lunk installer for Linux/macOS
+# Grymoire installer for Linux/macOS
 # Usage: curl -fsSL https://raw.githubusercontent.com/mgyenik/grymoire/main/scripts/install.sh | bash
 #    or: ./install.sh [version]
 
 REPO="mgyenik/grymoire"
-INSTALL_DIR="${LUNK_INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${GRYMOIRE_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${1:-latest}"
 
 info() { printf "\033[1;34m==>\033[0m %s\n" "$1"; }

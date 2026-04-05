@@ -1,6 +1,6 @@
 // Background service worker: manages native messaging, context menus, and keyboard shortcuts.
 
-const NATIVE_HOST = "com.lunk.app";
+const NATIVE_HOST = "com.grymoire.app";
 const PORT_PROD = 9723;
 const PORT_DEV = 9724;
 let apiBase = null; // resolved on first use
@@ -30,7 +30,7 @@ function connectNativeHost() {
 
     nativePort.onDisconnect.addListener(() => {
       const error = chrome.runtime.lastError;
-      console.warn("Lunk: native host disconnected:", error?.message || "unknown");
+      console.warn("Grymoire: native host disconnected:", error?.message || "unknown");
       nativePort = null;
 
       // Fall back to HTTP for all pending requests
@@ -43,7 +43,7 @@ function connectNativeHost() {
 
     return nativePort;
   } catch (err) {
-    console.warn("Lunk: failed to connect native host:", err);
+    console.warn("Grymoire: failed to connect native host:", err);
     nativePort = null;
     return null;
   }
@@ -69,10 +69,10 @@ function sendNativeMessage(action, data) {
 
     try {
       const msgSize = JSON.stringify({ action, data, _requestId: requestId }).length;
-      console.log(`Lunk: sending native message: action=${action}, size=${Math.round(msgSize/1024)}KB`);
+      console.log(`Grymoire: sending native message: action=${action}, size=${Math.round(msgSize/1024)}KB`);
       port.postMessage({ action, data, _requestId: requestId });
     } catch (err) {
-      console.warn(`Lunk: native message failed (${err.message}), falling back to HTTP`);
+      console.warn(`Grymoire: native message failed (${err.message}), falling back to HTTP`);
       clearTimeout(timeoutHandle);
       pendingRequests.delete(requestId);
       // Fallback to HTTP
@@ -115,18 +115,18 @@ async function resolveApiBase() {
       });
       if (resp.ok) {
         apiBase = `http://127.0.0.1:${port}/api/v1`;
-        console.log(`Lunk: using ${isDev ? "dev" : "prod"} server on port ${port}`);
+        console.log(`Grymoire: using ${isDev ? "dev" : "prod"} server on port ${port}`);
         return apiBase;
       }
     } catch { /* try next port */ }
   }
 
-  throw new Error("Lunk server not reachable on any port");
+  throw new Error("Grymoire server not reachable on any port");
 }
 
 async function sendHttpMessage(action, data) {
   try {
-    console.log(`Lunk: HTTP fallback for action=${action}`);
+    console.log(`Grymoire: HTTP fallback for action=${action}`);
     const API_BASE = await resolveApiBase();
     switch (action) {
       case "save_entry": {
@@ -158,7 +158,7 @@ async function sendHttpMessage(action, data) {
         }
 
         const bodyJson = JSON.stringify(body);
-        console.log(`Lunk: POST /entries payload size: ${Math.round(bodyJson.length/1024)}KB`);
+        console.log(`Grymoire: POST /entries payload size: ${Math.round(bodyJson.length/1024)}KB`);
         const resp = await fetch(`${API_BASE}/entries`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -167,7 +167,7 @@ async function sendHttpMessage(action, data) {
 
         if (!resp.ok) {
           const errText = await resp.text().catch(() => "");
-          console.error(`Lunk: POST /entries failed: HTTP ${resp.status}`, errText);
+          console.error(`Grymoire: POST /entries failed: HTTP ${resp.status}`, errText);
           throw new Error(`HTTP ${resp.status}`);
         }
         const entry = await resp.json();
@@ -246,14 +246,14 @@ async function sendHttpMessage(action, data) {
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
-    id: "lunk-save",
-    title: "Save to Lunk",
+    id: "grymoire-save",
+    title: "Save to Grymoire",
     contexts: ["page", "link"],
   });
 
   chrome.contextMenus.create({
-    id: "lunk-read-later",
-    title: "Save to Lunk (read later)",
+    id: "grymoire-read-later",
+    title: "Save to Grymoire (read later)",
     contexts: ["page", "link"],
   });
 });
@@ -261,12 +261,12 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab?.id) return;
 
-  const tags = info.menuItemId === "lunk-read-later" ? ["read-later"] : [];
+  const tags = info.menuItemId === "grymoire-read-later" ? ["read-later"] : [];
 
   try {
     await savePage(tab.id, tags);
   } catch (err) {
-    console.error("Lunk: context menu save failed:", err);
+    console.error("Grymoire: context menu save failed:", err);
   }
 });
 
@@ -315,7 +315,7 @@ async function savePage(tabId, tags = []) {
   await ensureContentScript(tabId);
 
   // Send extraction request to content script
-  console.log("Lunk: extracting page content...");
+  console.log("Grymoire: extracting page content...");
   const result = await chrome.tabs.sendMessage(tabId, {
     action: "extract",
     options: {},
@@ -335,9 +335,9 @@ async function savePage(tabId, tags = []) {
     pdf_base64: result.pdf_base64?.length || 0,
     content_type: result.content_type,
   };
-  console.log("Lunk: extraction result sizes:", sizes);
+  console.log("Grymoire: extraction result sizes:", sizes);
   const totalKB = Object.values(sizes).reduce((sum, v) => sum + (typeof v === "number" ? v : 0), 0) / 1024;
-  console.log(`Lunk: total payload ~${Math.round(totalKB)}KB (${Math.round(totalKB/1024)}MB)`);
+  console.log(`Grymoire: total payload ~${Math.round(totalKB)}KB (${Math.round(totalKB/1024)}MB)`);
 
   // If content script couldn't fetch the PDF (e.g. file:// URL),
   // try fetching from the background service worker

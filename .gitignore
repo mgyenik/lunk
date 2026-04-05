@@ -7,7 +7,7 @@ frontend/dist/
 frontend/.vite/
 
 # Tauri
-crates/lunk-app/gen/
+crates/grymoire-app/gen/
 
 # SQLite
 *.db
@@ -40,4 +40,4 @@ dist/
 *.dylib
 *.dll
 .fastembed_cache/
-crates/lunk-app/models/
+crates/grymoire-app/models/

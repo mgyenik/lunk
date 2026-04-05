@@ -80,7 +80,7 @@
         const snapshot = await captureSnapshot();
         result.snapshot_html = snapshot;
       } catch (err) {
-        console.warn("Lunk: snapshot capture failed:", err);
+        console.warn("Grymoire: snapshot capture failed:", err);
         // Non-fatal: we still have readable content
       }
     }
@@ -202,7 +202,7 @@
       return match;
     });
 
-    console.log(`Lunk: snapshot size: ${html.length} bytes (${Math.round(html.length/1024)}KB)`);
+    console.log(`Grymoire: snapshot size: ${html.length} bytes (${Math.round(html.length/1024)}KB)`);
 
     return html;
   }

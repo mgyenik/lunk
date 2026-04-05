@@ -1,4 +1,4 @@
-# Lunk
+# Grymoire
 
 Personal knowledge archive. Save web pages and PDFs, search them with full-text and semantic search, discover connections between documents automatically, and sync across devices via P2P.
 
@@ -94,32 +94,32 @@ grymoire save https://example.com
 grymoire save https://example.com --tag rust --tag async
 
 # Import a local PDF
-lunk import paper.pdf
-lunk import paper.pdf --title "My Paper" --tag research
+grymoire import paper.pdf
+grymoire import paper.pdf --title "My Paper" --tag research
 
 # Search
-lunk search "digital filter design"
-lunk search "impedance spectroscopy" --type pdf --json
+grymoire search "digital filter design"
+grymoire search "impedance spectroscopy" --type pdf --json
 
 # List / filter
-lunk list
-lunk list --type article --tag electronics
+grymoire list
+grymoire list --type article --tag electronics
 
 # Tags
-lunk tag <ID> rust async
-lunk tag <ID> --remove draft
+grymoire tag <ID> rust async
+grymoire tag <ID> --remove draft
 
 # Maintenance
-lunk retitle                    # re-extract titles using current logic
-lunk rebuild-fts                # rebuild full-text search index
-lunk backfill-pdfs              # re-extract text from PDFs
+grymoire retitle                    # re-extract titles using current logic
+grymoire rebuild-fts                # rebuild full-text search index
+grymoire backfill-pdfs              # re-extract text from PDFs
 
 # Export
-lunk export -o backup.json --with-content
+grymoire export -o backup.json --with-content
 
 # Start HTTP API server standalone
-lunk serve
-lunk serve --port 8080
+grymoire serve
+grymoire serve --port 8080
 ```
 
 ## Development
@@ -153,8 +153,8 @@ All tests use in-memory SQLite databases — no external files, network, or stat
 | custom    | `~/.local/share/grymoire/profiles/<name>/grymoire.db`  | 9723     |
 
 ```bash
-GRYMOIRE_PROFILE=staging lunk serve
-GRYMOIRE_DATA_DIR=/tmp/lunk-test lunk serve
+GRYMOIRE_PROFILE=staging grymoire serve
+GRYMOIRE_DATA_DIR=/tmp/grymoire-test lunk serve
 ```
 
 ## Chrome Extension
@@ -163,7 +163,7 @@ GRYMOIRE_DATA_DIR=/tmp/lunk-test lunk serve
 2. Click **Load unpacked** → select the `extension/` directory
 3. Register native messaging:
    ```bash
-   lunk install-native-messaging --extension-id <ID_FROM_CHROME>
+   grymoire install-native-messaging --extension-id <ID_FROM_CHROME>
    ```
 
 **Keyboard shortcuts:** `Alt+S` save current page, `Alt+Q` save with read-later tag.
@@ -173,10 +173,10 @@ The extension uses SingleFile for archive-quality snapshots and Readability for 
 ## P2P Sync
 
 ```bash
-lunk sync status                     # show node ID
-lunk sync add <PEER_NODE_ID> --name "laptop"
-lunk sync                            # trigger sync
-lunk sync list                       # list peers
+grymoire sync status                     # show node ID
+grymoire sync add <PEER_NODE_ID> --name "laptop"
+grymoire sync                            # trigger sync
+grymoire sync list                       # list peers
 ```
 
 No external services needed — works out of the box.
@@ -194,7 +194,7 @@ The embedding model (all-MiniLM-L6-v2, ~22MB) is downloaded at build time and bu
 
 ## Configuration
 
-`~/.config/lunk/config.toml` (or `~/.config/lunk/profiles/<name>/config.toml`)
+`~/.config/grymoire/config.toml` (or `~/.config/grymoire/profiles/<name>/config.toml`)
 
 ```toml
 [server]

@@ -1,6 +1,6 @@
 {
-  "name": "com.lunk.app",
-  "description": "Lunk link archiving system",
+  "name": "com.grymoire.app",
+  "description": "Grymoire link archiving system",
   "path": "BINARY_PATH",
   "type": "stdio",
   "allowed_origins": [

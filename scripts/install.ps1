@@ -1,4 +1,4 @@
-# Lunk installer for Windows
+# Grymoire installer for Windows
 # Usage: irm https://raw.githubusercontent.com/mgyenik/grymoire/main/scripts/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
