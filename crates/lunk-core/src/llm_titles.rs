@@ -8,7 +8,10 @@ use crate::llm_engine::LlmEngine;
 use crate::titles;
 
 /// Maximum text length to include in the title generation prompt.
-const MAX_CONTEXT_CHARS: usize = 800;
+/// Generous budget — title is usually in the first few paragraphs but some
+/// pages bury it after author metadata. ~3000 chars ≈ 750 tokens, well
+/// within even a 4096-token context window.
+const MAX_CONTEXT_CHARS: usize = 3000;
 
 /// Maximum tokens to generate for a title.
 const MAX_TITLE_TOKENS: u32 = 60;

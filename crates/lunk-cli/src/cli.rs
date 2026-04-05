@@ -452,7 +452,7 @@ pub fn retitle() -> Result<()> {
     Ok(())
 }
 
-pub fn llm_retitle(model_id: &str, bad_only: bool) -> Result<()> {
+pub fn llm_retitle(model_id: &str, bad_only: bool, filter_ids: &[String]) -> Result<()> {
     use lunk_core::{llm_catalog, llm_engine, llm_models, llm_titles};
     use rusqlite::params;
     use std::time::Instant;
@@ -506,6 +506,11 @@ pub fn llm_retitle(model_id: &str, bad_only: bool) -> Result<()> {
     let template = Some(entry.chat_template);
 
     for (id, old_title, _content_type, extracted_text) in &rows {
+        // Filter by ID prefix if specified
+        if !filter_ids.is_empty() && !filter_ids.iter().any(|f| id.starts_with(f)) {
+            continue;
+        }
+
         if extracted_text.len() < 50 {
             skipped += 1;
             continue;

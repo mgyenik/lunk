@@ -127,6 +127,9 @@ enum Commands {
         /// Only retitle entries with generic/bad titles
         #[arg(long)]
         bad_only: bool,
+        /// Only retitle specific entry IDs (prefix match)
+        #[arg(long)]
+        id: Vec<String>,
     },
     /// Re-extract text from stored PDFs that have no extracted text
     BackfillPdfs,
@@ -220,7 +223,7 @@ async fn main() {
         Some(Commands::Transfer { from }) => cli::transfer(&from),
         Some(Commands::RebuildFts) => cli::rebuild_fts(),
         Some(Commands::Retitle) => cli::retitle(),
-        Some(Commands::LlmRetitle { model, bad_only }) => cli::llm_retitle(&model, bad_only),
+        Some(Commands::LlmRetitle { model, bad_only, id }) => cli::llm_retitle(&model, bad_only, &id),
         Some(Commands::BackfillPdfs) => cli::backfill_pdfs(),
         Some(Commands::Backfill) => cli::backfill_all(),
         Some(Commands::MigrateStatus) => cli::migrate_status(),
