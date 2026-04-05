@@ -130,6 +130,8 @@ enum Commands {
     },
     /// Re-extract text from stored PDFs that have no extracted text
     BackfillPdfs,
+    /// Backfill embeddings, keywords, and chunk embeddings for all entries
+    Backfill,
     /// Transfer entries from another profile or database
     Transfer {
         /// Source profile name (e.g., "dev", "default") or path to .db file
@@ -220,6 +222,7 @@ async fn main() {
         Some(Commands::Retitle) => cli::retitle(),
         Some(Commands::LlmRetitle { model, bad_only }) => cli::llm_retitle(&model, bad_only),
         Some(Commands::BackfillPdfs) => cli::backfill_pdfs(),
+        Some(Commands::Backfill) => cli::backfill_all(),
         Some(Commands::MigrateStatus) => cli::migrate_status(),
         None => {
             eprintln!("No command provided. Run `lunk --help` for usage.");

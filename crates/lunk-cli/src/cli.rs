@@ -400,6 +400,32 @@ pub fn export(output: Option<&str>, with_content: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn backfill_all() -> Result<()> {
+    use lunk_core::{chunks, embeddings, keywords};
+    use std::time::Instant;
+
+    let db_path = Config::db_path()?;
+    eprintln!("database: {}", db_path.display());
+
+    let conn = open_conn()?;
+    let model = embeddings::EmbeddingModel::new(None)?;
+
+    let t = Instant::now();
+    let emb = embeddings::embed_all_missing(&conn, &model)?;
+    eprintln!("embeddings: {emb} created ({:.1}s)", t.elapsed().as_secs_f64());
+
+    let t = Instant::now();
+    let kw = keywords::extract_all_missing(&conn)?;
+    eprintln!("keywords:   {kw} extracted ({:.1}s)", t.elapsed().as_secs_f64());
+
+    let t = Instant::now();
+    let ch = chunks::chunk_all_missing(&conn, &model)?;
+    eprintln!("chunks:     {ch} created ({:.1}s)", t.elapsed().as_secs_f64());
+
+    println!("Done: {emb} embeddings, {kw} keywords, {ch} chunks");
+    Ok(())
+}
+
 pub fn backfill_pdfs() -> Result<()> {
     let profile = config::active_profile();
     let db_path = Config::db_path()?;
