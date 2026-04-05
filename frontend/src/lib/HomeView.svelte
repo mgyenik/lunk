@@ -62,8 +62,8 @@
           <path d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
         </svg>
       </div>
-      <h2 class="text-[17px] font-semibold text-text-primary mb-1">Start your archive</h2>
-      <p class="text-[13px] text-text-secondary text-center mb-6 leading-relaxed">
+      <h2 class="text-xl font-semibold text-text-primary mb-1">Start your archive</h2>
+      <p class="text-base text-text-secondary text-center mb-6 leading-relaxed">
         Save articles, papers, and documents you want to keep forever.
       </p>
       <div class="w-full space-y-2 text-left">
@@ -73,10 +73,10 @@
           { n: '3', title: 'CLI', desc: 'grymoire save <url>' },
         ] as step}
           <div class="flex items-start gap-3 p-3 rounded-lg bg-surface-raised border border-border-subtle">
-            <span class="font-brand text-accent text-[12px] font-bold mt-px">{step.n}</span>
+            <span class="font-brand text-accent text-body font-bold mt-px">{step.n}</span>
             <div>
-              <p class="text-[12px] font-medium text-text-primary">{step.title}</p>
-              <p class="text-[11px] text-text-tertiary">{step.desc}</p>
+              <p class="text-body font-medium text-text-primary">{step.title}</p>
+              <p class="text-ui text-text-tertiary">{step.desc}</p>
             </div>
           </div>
         {/each}
@@ -97,7 +97,7 @@
             bind:this={searchEl}
             type="text"
             placeholder="Search your archive..."
-            class="flex-1 text-[16px] outline-none bg-transparent text-text-primary placeholder-text-tertiary"
+            class="flex-1 text-lg outline-none bg-transparent text-text-primary placeholder-text-tertiary"
             bind:value={searchValue}
             oninput={handleSearchInput}
             onkeydown={handleSearchKeydown}
@@ -105,14 +105,14 @@
             onblur={() => searchFocused = false}
           />
           {#if !searchValue && !searchFocused}
-            <kbd class="font-brand text-[11px] px-2 py-0.5 rounded-md border border-border text-text-tertiary">/</kbd>
+            <kbd class="font-brand text-ui px-2 py-0.5 rounded-md border border-border text-text-tertiary">/</kbd>
           {/if}
         </div>
       </div>
 
       <!-- Stats -->
       {#if stats}
-        <div class="flex items-center gap-4 mb-8 font-brand text-[11px] text-text-tertiary">
+        <div class="flex items-center gap-4 mb-8 font-brand text-ui text-text-tertiary">
           <span>{stats.total_entries} entries</span>
           <span class="w-1 h-1 rounded-full bg-text-tertiary/40"></span>
           <span>{stats.pdf_count} PDFs</span>
@@ -131,8 +131,8 @@
       {#if recentEntries.length > 0}
         <div class="mb-8">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-tertiary">Recent</h3>
-            <button class="text-[11px] text-text-tertiary hover:text-accent transition-colors" onclick={onBrowseAll}>
+            <h3 class="text-ui font-semibold uppercase tracking-[0.1em] text-text-tertiary">Recent</h3>
+            <button class="text-ui text-text-tertiary hover:text-accent transition-colors" onclick={onBrowseAll}>
               Browse all &rarr;
             </button>
           </div>
@@ -149,22 +149,22 @@
                       onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                   {:else}
                     <div class="w-3.5 h-3.5 rounded-sm {entry.content_type === 'pdf' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-accent-soft'} flex items-center justify-center">
-                      <span class="text-[7px] font-bold {entry.content_type === 'pdf' ? 'text-red-400' : 'text-accent'}">{entryInitial(entry)}</span>
+                      <span class="text-micro font-bold {entry.content_type === 'pdf' ? 'text-red-400' : 'text-accent'}">{entryInitial(entry)}</span>
                     </div>
                   {/if}
-                  <span class="font-brand text-[9px] text-text-tertiary truncate">{entry.domain ?? entry.content_type.toUpperCase()}</span>
+                  <span class="font-brand text-xs text-text-tertiary truncate">{entry.domain ?? entry.content_type.toUpperCase()}</span>
                 </div>
-                <h4 class="text-[12px] font-semibold text-text-primary line-clamp-2 leading-snug mb-1.5 group-hover:text-accent transition-colors">
+                <h4 class="text-body font-semibold text-text-primary line-clamp-2 leading-snug mb-1.5 group-hover:text-accent transition-colors">
                   {entry.title}
                 </h4>
                 {#if entry.tags.length > 0}
                   <div class="flex gap-1 flex-wrap mb-1.5">
                     {#each entry.tags.slice(0, 2) as tag}
-                      <span class="font-brand text-[8px] px-1 py-px rounded bg-accent-soft text-accent">#<!-- -->{tag}</span>
+                      <span class="font-brand text-micro px-1 py-px rounded bg-accent-soft text-accent">#<!-- -->{tag}</span>
                     {/each}
                   </div>
                 {/if}
-                <span class="font-brand text-[9px] text-text-tertiary">{formatDate(entry.created_at)}</span>
+                <span class="font-brand text-xs text-text-tertiary">{formatDate(entry.created_at)}</span>
               </button>
             {/each}
           </div>
@@ -174,7 +174,7 @@
       <!-- Tags -->
       {#if allTags.length > 0}
         <div class="mb-8">
-          <h3 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-tertiary mb-3">Tags</h3>
+          <h3 class="text-ui font-semibold uppercase tracking-[0.1em] text-text-tertiary mb-3">Tags</h3>
           <div class="flex flex-wrap gap-1.5">
             {#each allTags as tag}
               <FilterChip
@@ -191,7 +191,7 @@
       <!-- Topics -->
       {#if topics.length > 0}
         <div>
-          <h3 class="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-tertiary mb-3">Topics</h3>
+          <h3 class="text-ui font-semibold uppercase tracking-[0.1em] text-text-tertiary mb-3">Topics</h3>
           <div class="flex flex-wrap gap-2">
             {#each topics as topic}
               <button
@@ -200,15 +200,15 @@
                 onclick={() => onTopicSelect(topic.label)}
                 title={topic.sample_titles.join('\n')}
               >
-                <span class="text-[12px] font-medium text-text-primary group-hover:text-accent transition-colors">{topic.label}</span>
-                <span class="font-brand text-[10px] text-text-tertiary">{topic.entry_count}</span>
+                <span class="text-body font-medium text-text-primary group-hover:text-accent transition-colors">{topic.label}</span>
+                <span class="font-brand text-sm text-text-tertiary">{topic.entry_count}</span>
               </button>
             {/each}
           </div>
         </div>
       {:else if stats && stats.total_entries > 0 && stats.total_entries < 10}
         <div class="text-center py-4">
-          <p class="text-[12px] text-text-tertiary">Topics will appear as your archive grows</p>
+          <p class="text-body text-text-tertiary">Topics will appear as your archive grows</p>
         </div>
       {/if}
     </div>

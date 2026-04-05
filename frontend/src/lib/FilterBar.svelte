@@ -21,7 +21,7 @@
 
 {#if hasFilters}
   <div class="px-4 py-2 bg-surface-sunken border-b border-border flex items-center gap-2 shrink-0">
-    <span class="font-brand text-[9px] uppercase tracking-[0.12em] text-text-tertiary">Filtering</span>
+    <span class="font-brand text-xs uppercase tracking-[0.12em] text-text-tertiary">Filtering</span>
 
     {#if tag}
       <FilterChip label={tag} variant="tag" active removable onremove={onClearTag} />
@@ -42,7 +42,7 @@
     {/if}
 
     <button
-      class="ml-auto font-brand text-[9px] text-text-tertiary hover:text-accent transition-colors"
+      class="ml-auto font-brand text-xs text-text-tertiary hover:text-accent transition-colors"
       onclick={onClearAll}
     >Clear all</button>
   </div>

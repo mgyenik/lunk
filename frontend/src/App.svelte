@@ -279,7 +279,7 @@
   {#if isDragOver}
     <div class="absolute inset-0 z-50 bg-accent/8 border-2 border-dashed border-accent/40 rounded-lg flex items-center justify-center pointer-events-none">
       <div class="bg-surface-raised px-6 py-4 rounded-xl shadow-xl shadow-accent/10 border border-accent/20">
-        <p class="text-accent text-[15px] font-semibold">Drop PDF to import</p>
+        <p class="text-accent text-md font-semibold">Drop PDF to import</p>
       </div>
     </div>
   {/if}

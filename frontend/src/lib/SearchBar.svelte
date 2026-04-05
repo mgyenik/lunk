@@ -65,7 +65,7 @@
       bind:this={inputEl}
       type="text"
       placeholder="Search your archive..."
-      class="flex-1 text-[13px] outline-none bg-transparent text-text-primary placeholder-text-tertiary"
+      class="flex-1 text-base outline-none bg-transparent text-text-primary placeholder-text-tertiary"
       bind:value={inputValue}
       oninput={handleInput}
       onkeydown={handleKeydown}
@@ -83,7 +83,7 @@
         </svg>
       </button>
     {:else if !isFocused}
-      <kbd class="font-brand text-[10px] px-1.5 py-0.5 rounded border border-border text-text-tertiary">/</kbd>
+      <kbd class="font-brand text-sm px-1.5 py-0.5 rounded border border-border text-text-tertiary">/</kbd>
     {/if}
   </div>
 </div>

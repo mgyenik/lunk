@@ -185,11 +185,11 @@
     <svg class="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
       <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
     </svg>
-    <h2 class="text-[14px] font-semibold text-text-primary">Chat</h2>
+    <h2 class="text-md font-semibold text-text-primary">Chat</h2>
     <div class="flex-1"></div>
     {#if messages.length > 0}
       <button
-        class="text-[11px] px-2.5 py-1 rounded-md border border-border text-text-secondary hover:bg-surface-raised hover:text-text-primary transition-colors"
+        class="text-ui px-2.5 py-1 rounded-md border border-border text-text-secondary hover:bg-surface-raised hover:text-text-primary transition-colors"
         onclick={newConversation}
       >New conversation</button>
     {/if}
@@ -204,8 +204,8 @@
             <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
         </div>
-        <p class="text-[13px] text-text-secondary mb-1">No AI model loaded</p>
-        <p class="text-[11px] text-text-tertiary">Download a model in Settings to start chatting</p>
+        <p class="text-base text-text-secondary mb-1">No AI model loaded</p>
+        <p class="text-ui text-text-tertiary">Download a model in Settings to start chatting</p>
       </div>
     {:else if messages.length === 0 && !isStreaming}
       <div class="flex flex-col items-center justify-center py-16" in:fade={{ duration: 150 }}>
@@ -214,14 +214,14 @@
             <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
         </div>
-        <p class="text-[14px] font-medium text-text-primary mb-1">Ask your archive</p>
-        <p class="text-[12px] text-text-tertiary mb-5 max-w-sm text-center leading-relaxed">
+        <p class="text-md font-medium text-text-primary mb-1">Ask your archive</p>
+        <p class="text-body text-text-tertiary mb-5 max-w-sm text-center leading-relaxed">
           Ask questions about your saved articles and PDFs. Answers are grounded in your content with source citations.
         </p>
         <div class="flex flex-wrap gap-2 justify-center max-w-md">
           {#each suggestedQuestions as example}
             <button
-              class="text-[11px] px-3 py-1.5 rounded-lg border border-border-subtle text-text-secondary
+              class="text-ui px-3 py-1.5 rounded-lg border border-border-subtle text-text-secondary
                 hover:border-accent/30 hover:text-accent hover:bg-accent-soft/30 transition-all text-left"
               onclick={() => useExample(example)}
             >{example}</button>
@@ -234,18 +234,18 @@
         {#if msg.role === 'user'}
           <div class="flex justify-end" in:fly={{ y: 8, duration: 200 }}>
             <div class="max-w-[80%] bg-accent text-white rounded-2xl rounded-br-sm px-4 py-2.5 shadow-sm shadow-accent/10">
-              <p class="text-[13px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+              <p class="text-base leading-relaxed whitespace-pre-wrap">{msg.content}</p>
             </div>
           </div>
         {:else}
           <!-- Assistant message with inline citations -->
           <div class="flex justify-start" in:fly={{ y: 8, duration: 200 }}>
             <div class="max-w-[85%] bg-surface-raised border border-border-subtle rounded-2xl rounded-bl-sm px-4 py-3">
-              <p class="text-[13px] leading-relaxed whitespace-pre-wrap">
+              <p class="text-base leading-relaxed whitespace-pre-wrap">
                 {#each parseCitations(msg.content) as part}
                   {#if part.type === 'citation'}
                     <button
-                      class="inline-flex items-center px-1 py-0.5 -my-0.5 mx-0.5 rounded text-[10px] font-brand
+                      class="inline-flex items-center px-1 py-0.5 -my-0.5 mx-0.5 rounded text-sm font-brand
                         bg-accent-soft text-accent hover:bg-accent hover:text-white transition-colors cursor-pointer align-baseline"
                       onclick={() => {
                         const idx = parseInt(part.value.slice(1, -1)) - 1;
@@ -269,10 +269,10 @@
                   onclick={() => handleSourceClick(source)}
                 >
                   <div class="flex items-center gap-1.5 mb-1">
-                    <span class="text-[9px] font-brand px-1 py-0.5 rounded bg-accent-soft text-accent">{source.label}</span>
-                    <span class="text-[11px] font-medium text-text-primary truncate group-hover:text-accent transition-colors">{source.entry_title}</span>
+                    <span class="text-xs font-brand px-1 py-0.5 rounded bg-accent-soft text-accent">{source.label}</span>
+                    <span class="text-ui font-medium text-text-primary truncate group-hover:text-accent transition-colors">{source.entry_title}</span>
                   </div>
-                  <p class="text-[10px] text-text-tertiary line-clamp-2">{source.snippet}</p>
+                  <p class="text-sm text-text-tertiary line-clamp-2">{source.snippet}</p>
                 </button>
               {/each}
             </div>
@@ -285,10 +285,10 @@
         <div class="flex justify-start" in:fly={{ y: 8, duration: 200 }}>
           <div class="max-w-[85%] bg-surface-raised border border-border-subtle rounded-2xl rounded-bl-sm px-4 py-3">
             {#if streamContent}
-              <p class="text-[13px] leading-relaxed whitespace-pre-wrap">
+              <p class="text-base leading-relaxed whitespace-pre-wrap">
                 {#each parseCitations(streamContent) as part}
                   {#if part.type === 'citation'}
-                    <span class="inline-flex items-center px-1 py-0.5 -my-0.5 mx-0.5 rounded text-[10px] font-brand bg-accent-soft text-accent align-baseline">{part.value}</span>
+                    <span class="inline-flex items-center px-1 py-0.5 -my-0.5 mx-0.5 rounded text-sm font-brand bg-accent-soft text-accent align-baseline">{part.value}</span>
                   {:else}
                     {part.value}
                   {/if}
@@ -313,10 +313,10 @@
                 onclick={() => handleSourceClick(source)}
               >
                 <div class="flex items-center gap-1.5 mb-1">
-                  <span class="text-[9px] font-brand px-1 py-0.5 rounded bg-accent-soft text-accent">{source.label}</span>
-                  <span class="text-[11px] font-medium text-text-primary truncate group-hover:text-accent transition-colors">{source.entry_title}</span>
+                  <span class="text-xs font-brand px-1 py-0.5 rounded bg-accent-soft text-accent">{source.label}</span>
+                  <span class="text-ui font-medium text-text-primary truncate group-hover:text-accent transition-colors">{source.entry_title}</span>
                 </div>
-                <p class="text-[10px] text-text-tertiary line-clamp-2">{source.snippet}</p>
+                <p class="text-sm text-text-tertiary line-clamp-2">{source.snippet}</p>
               </button>
             {/each}
           </div>
@@ -328,7 +328,7 @@
   </div>
 
   {#if error}
-    <div class="mx-4 mb-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-[12px] text-red-700 dark:text-red-400"
+    <div class="mx-4 mb-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-body text-red-700 dark:text-red-400"
       in:fly={{ y: 4, duration: 150 }}>
       {error}
     </div>
@@ -341,7 +341,7 @@
         focus-within:border-accent/40 focus-within:shadow-sm focus-within:shadow-accent/5 transition-all">
         <textarea
           bind:this={inputEl}
-          class="flex-1 bg-transparent text-[13px] text-text-primary placeholder-text-tertiary
+          class="flex-1 bg-transparent text-base text-text-primary placeholder-text-tertiary
             outline-none resize-none max-h-32 leading-relaxed"
           rows="1"
           placeholder="Ask a question about your archive..."

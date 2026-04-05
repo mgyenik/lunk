@@ -115,5 +115,5 @@
     {/if}
   </button>
 
-  <span class="font-brand text-[8px] text-text-tertiary mt-1">0.4</span>
+  <span class="font-brand text-micro text-text-tertiary mt-1">0.4</span>
 </nav>

@@ -52,8 +52,8 @@
         <path d="M15 19l-7-7 7-7" />
       </svg>
     </button>
-    <h2 class="text-[14px] font-semibold text-text-primary">{title}</h2>
-    <span class="font-brand text-[11px] text-text-tertiary">{totalCount}</span>
+    <h2 class="text-md font-semibold text-text-primary">{title}</h2>
+    <span class="font-brand text-ui text-text-tertiary">{totalCount}</span>
 
     <div class="ml-auto flex items-center gap-1">
       {#each [
@@ -78,7 +78,7 @@
       </div>
     {:else if entries.length === 0}
       <div class="flex flex-col items-center justify-center py-20">
-        <p class="text-[13px] text-text-secondary">No entries match these filters</p>
+        <p class="text-base text-text-secondary">No entries match these filters</p>
       </div>
     {:else}
       <div class="card-grid">
@@ -101,17 +101,17 @@
               {:else}
                 <div class="w-3.5 h-3.5 rounded-sm flex items-center justify-center
                   {entry.content_type === 'pdf' ? 'bg-red-50 dark:bg-red-950/30' : 'bg-accent-soft'}">
-                  <span class="text-[7px] font-bold {entry.content_type === 'pdf' ? 'text-red-400' : 'text-accent'}">{entryInitial(entry)}</span>
+                  <span class="text-micro font-bold {entry.content_type === 'pdf' ? 'text-red-400' : 'text-accent'}">{entryInitial(entry)}</span>
                 </div>
               {/if}
               {#if entry.domain}
                 <FilterChip label={entry.domain} variant="domain" onclick={() => onDomainClick(entry.domain!)} />
               {/if}
-              <span class="ml-auto font-brand text-[8px] text-text-tertiary uppercase">{entry.content_type === 'pdf' ? 'PDF' : 'WEB'}</span>
+              <span class="ml-auto font-brand text-micro text-text-tertiary uppercase">{entry.content_type === 'pdf' ? 'PDF' : 'WEB'}</span>
             </div>
 
             <!-- Title -->
-            <h3 class="text-[13px] font-semibold text-text-primary line-clamp-2 leading-snug mb-2 group-hover:text-accent transition-colors">
+            <h3 class="text-base font-semibold text-text-primary line-clamp-2 leading-snug mb-2 group-hover:text-accent transition-colors">
               {entry.title}
             </h3>
 
@@ -125,7 +125,7 @@
             {/if}
 
             <!-- Footer -->
-            <div class="flex items-center gap-2 font-brand text-[10px] text-text-tertiary">
+            <div class="flex items-center gap-2 font-brand text-sm text-text-tertiary">
               <span>{formatDate(entry.created_at)}</span>
               {#if entry.word_count}<span>{entry.word_count.toLocaleString()}w</span>{/if}
             </div>

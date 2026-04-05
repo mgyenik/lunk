@@ -16,11 +16,31 @@
   --color-text-primary: #1c1917;
   --color-text-secondary: #78716c;
   --color-text-tertiary: #a8a29e;
+
+  /* Typography scale */
+  --font-size-micro: 8px;
+  --font-size-xs: 9px;
+  --font-size-sm: 10px;
+  --font-size-ui: 11px;
+  --font-size-body: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
 }
 
-:root {
-  --sidebar-width: 232px;
-}
+/* ── Typography scale ──
+ * Semantic sizes used consistently across all components.
+ * text-micro:  7-8px  — icon initials, version badges (rare)
+ * text-xs:     9px    — metadata badges, FilterChip counts
+ * text-sm:     10px   — stats, timestamps, font-brand metadata
+ * text-ui:     11px   — buttons, chip labels, secondary UI text
+ * text-body:   12px   — body text, descriptions, form inputs
+ * text-base:   13px   — primary content text, messages, titles in lists
+ * text-md:     14px   — section headings, emphasis text
+ * text-lg:     16px   — page/panel headings
+ * text-xl:     18px   — hero headings (welcome flow)
+ */
 
 .dark {
   --color-accent-soft: rgba(134, 59, 255, 0.10);

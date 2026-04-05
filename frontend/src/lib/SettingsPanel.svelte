@@ -92,8 +92,8 @@
 </script>
 
 <div class="flex-1 overflow-y-auto p-6 max-w-2xl">
-  <h2 class="text-[16px] font-semibold text-text-primary mb-1">Settings</h2>
-  <p class="text-[12px] text-text-tertiary mb-6">Manage AI models and preferences</p>
+  <h2 class="text-lg font-semibold text-text-primary mb-1">Settings</h2>
+  <p class="text-body text-text-tertiary mb-6">Manage AI models and preferences</p>
 
   {#if isLoading}
     <div class="flex items-center justify-center py-20">
@@ -103,13 +103,13 @@
     <!-- LLM Status -->
     <div class="rounded-lg bg-surface-raised border border-border p-4 mb-6">
       <div class="flex items-center justify-between mb-2">
-        <h3 class="text-[13px] font-semibold text-text-primary">AI Model</h3>
+        <h3 class="text-base font-semibold text-text-primary">AI Model</h3>
         {#if status?.model_loaded}
-          <span class="text-[10px] px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-brand">
+          <span class="text-sm px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-brand">
             Loaded
           </span>
         {:else}
-          <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-brand">
+          <span class="text-sm px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-brand">
             No model
           </span>
         {/if}
@@ -117,12 +117,12 @@
       {#if status?.active_model}
         {@const activeEntry = catalog.find(m => m.id === status?.active_model)}
         {#if activeEntry}
-          <p class="text-[12px] text-text-secondary">
+          <p class="text-body text-text-secondary">
             {activeEntry.name} <span class="text-text-tertiary">({activeEntry.param_label} {activeEntry.quant_label})</span>
           </p>
         {/if}
       {:else}
-        <p class="text-[12px] text-text-secondary">
+        <p class="text-body text-text-secondary">
           Download and activate a model to enable AI title generation.
         </p>
       {/if}
@@ -132,8 +132,8 @@
     <div class="rounded-lg bg-surface-raised border border-border p-4 mb-6">
       <div class="flex items-center justify-between">
         <div>
-          <h3 class="text-[13px] font-semibold text-text-primary">Title Generation</h3>
-          <p class="text-[11px] text-text-tertiary mt-0.5">Use AI to generate titles for saved articles and PDFs</p>
+          <h3 class="text-base font-semibold text-text-primary">Title Generation</h3>
+          <p class="text-ui text-text-tertiary mt-0.5">Use AI to generate titles for saved articles and PDFs</p>
         </div>
         <button
           class="relative w-10 h-5 rounded-full transition-colors duration-200 {status?.title_generation_enabled ? 'bg-accent' : 'bg-border'}"
@@ -149,7 +149,7 @@
 
     <!-- Model Catalog -->
     <div class="mb-6">
-      <h3 class="text-[13px] font-semibold text-text-primary mb-3">Available Models</h3>
+      <h3 class="text-base font-semibold text-text-primary mb-3">Available Models</h3>
       <div class="space-y-2">
         {#each catalog as model (model.id)}
           <ModelCard
@@ -166,7 +166,7 @@
   {/if}
 
   {#if error}
-    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-[12px] text-red-700 dark:text-red-400">
+    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-body text-red-700 dark:text-red-400">
       {error}
     </div>
   {/if}

@@ -50,7 +50,7 @@
 </script>
 
 <button
-  class="inline-flex items-center gap-1 font-brand text-[10px] px-2 py-[3px] rounded-md
+  class="inline-flex items-center gap-1 font-brand text-sm px-2 py-[3px] rounded-md
     cursor-pointer transition-all duration-150 select-none shrink-0
     {classes[variant]}"
   onclick={handleClick}

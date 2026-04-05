@@ -89,18 +89,18 @@
             <path d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
           </svg>
         </div>
-        <h2 class="text-[18px] font-semibold text-text-primary mb-2">Welcome to Grymoire</h2>
-        <p class="text-[13px] text-text-secondary leading-relaxed max-w-sm mx-auto">
+        <h2 class="text-xl font-semibold text-text-primary mb-2">Welcome to Grymoire</h2>
+        <p class="text-base text-text-secondary leading-relaxed max-w-sm mx-auto">
           Grymoire uses a local AI model to generate titles for your saved articles and PDFs.
           Choose a model to get started — everything runs on your machine, nothing leaves your device.
         </p>
         <div class="mt-6 flex flex-col gap-2">
           <button
-            class="px-5 py-2.5 rounded-lg bg-accent text-white text-[13px] font-medium hover:bg-accent-hover transition-colors"
+            class="px-5 py-2.5 rounded-lg bg-accent text-white text-base font-medium hover:bg-accent-hover transition-colors"
             onclick={() => { step = 'pick'; }}
           >Choose a Model</button>
           <button
-            class="text-[12px] text-text-tertiary hover:text-text-secondary transition-colors"
+            class="text-body text-text-tertiary hover:text-text-secondary transition-colors"
             onclick={handleSkip}
           >Skip for now</button>
         </div>
@@ -109,8 +109,8 @@
     {:else if step === 'pick'}
       <!-- Model Picker -->
       <div class="p-6">
-        <h2 class="text-[16px] font-semibold text-text-primary mb-1">Choose a Model</h2>
-        <p class="text-[12px] text-text-tertiary mb-4">
+        <h2 class="text-lg font-semibold text-text-primary mb-1">Choose a Model</h2>
+        <p class="text-body text-text-tertiary mb-4">
           Smaller models are faster but less capable. You can change this later in Settings.
         </p>
 
@@ -123,15 +123,15 @@
             >
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
-                  <h4 class="text-[13px] font-semibold text-text-primary">{model.name}</h4>
+                  <h4 class="text-base font-semibold text-text-primary">{model.name}</h4>
                   {#if model.recommended}
-                    <span class="text-[9px] px-1.5 py-0.5 rounded-md bg-accent-soft text-accent font-brand uppercase tracking-wider">Recommended</span>
+                    <span class="text-xs px-1.5 py-0.5 rounded-md bg-accent-soft text-accent font-brand uppercase tracking-wider">Recommended</span>
                   {/if}
                 </div>
-                <span class="font-brand text-[11px] text-text-tertiary">{model.size_display}</span>
+                <span class="font-brand text-ui text-text-tertiary">{model.size_display}</span>
               </div>
-              <p class="text-[11px] text-text-secondary mt-0.5">{model.description}</p>
-              <div class="flex gap-3 mt-1.5 font-brand text-[10px] text-text-tertiary">
+              <p class="text-ui text-text-secondary mt-0.5">{model.description}</p>
+              <div class="flex gap-3 mt-1.5 font-brand text-sm text-text-tertiary">
                 <span>{model.param_label}</span>
                 <span>{model.quant_label}</span>
                 <span>~{(model.min_ram_mb / 1024).toFixed(1)} GB RAM</span>
@@ -141,16 +141,16 @@
         </div>
 
         {#if error}
-          <p class="text-[12px] text-red-500 mb-3">{error}</p>
+          <p class="text-body text-red-500 mb-3">{error}</p>
         {/if}
 
         <div class="flex items-center justify-between">
           <button
-            class="text-[12px] text-text-tertiary hover:text-text-secondary transition-colors"
+            class="text-body text-text-tertiary hover:text-text-secondary transition-colors"
             onclick={handleSkip}
           >Skip for now</button>
           <button
-            class="px-5 py-2 rounded-lg bg-accent text-white text-[13px] font-medium hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            class="px-5 py-2 rounded-lg bg-accent text-white text-base font-medium hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             onclick={startDownload}
             disabled={!selectedModel}
           >Download & Activate</button>
@@ -163,8 +163,8 @@
         {@const model = catalog.find(m => m.id === selectedModel)}
         <div class="p-8">
           <div class="text-center mb-6">
-            <h2 class="text-[16px] font-semibold text-text-primary mb-1">Downloading Model</h2>
-            <p class="text-[12px] text-text-tertiary">{model?.name ?? selectedModel}</p>
+            <h2 class="text-lg font-semibold text-text-primary mb-1">Downloading Model</h2>
+            <p class="text-body text-text-tertiary">{model?.name ?? selectedModel}</p>
           </div>
 
           <div class="w-full h-2 bg-surface-sunken rounded-full overflow-hidden mb-2">
@@ -174,13 +174,13 @@
             ></div>
           </div>
 
-          <div class="flex justify-between font-brand text-[11px] text-text-tertiary">
+          <div class="flex justify-between font-brand text-ui text-text-tertiary">
             <span>{formatBytes(downloadBytes)} / {model?.size_display ?? '?'}</span>
             <span>{progressPercent}%</span>
           </div>
 
           {#if error}
-            <p class="text-[12px] text-red-500 mt-4 text-center">{error}</p>
+            <p class="text-body text-red-500 mt-4 text-center">{error}</p>
           {/if}
         </div>
       {/if}

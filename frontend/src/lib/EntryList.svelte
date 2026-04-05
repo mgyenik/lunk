@@ -54,10 +54,10 @@
 <div class="flex-1 flex flex-col overflow-hidden bg-surface">
   <!-- Header -->
   <div class="px-4 py-2.5 border-b border-border-subtle flex items-center gap-2 shrink-0">
-    <h2 class="text-[13px] font-semibold text-text-primary truncate">
+    <h2 class="text-base font-semibold text-text-primary truncate">
       {#if currentView === 'search'}Results for "{searchQuery}"{:else}Entries{/if}
     </h2>
-    <span class="font-brand text-[10px] text-text-tertiary tabular-nums">{totalCount}</span>
+    <span class="font-brand text-sm text-text-tertiary tabular-nums">{totalCount}</span>
   </div>
 
   <!-- List -->
@@ -73,8 +73,8 @@
             <path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
           </svg>
         </div>
-        <p class="text-[13px] font-medium text-text-secondary">No results for "{searchQuery}"</p>
-        <p class="text-[11px] text-text-tertiary mt-1">Try different search terms</p>
+        <p class="text-base font-medium text-text-secondary">No results for "{searchQuery}"</p>
+        <p class="text-ui text-text-tertiary mt-1">Try different search terms</p>
       </div>
     {:else}
       {#each entries as entry, i (entry.id)}
@@ -94,20 +94,20 @@
               {#if entry.content_type === 'article' && entry.domain}
                 <img src="https://www.google.com/s2/favicons?domain={entry.domain}&sz=16" alt="" class="w-3.5 h-3.5 rounded-sm"
                   onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }} />
-                <span class="hidden font-brand text-[10px] font-bold text-accent">{entryInitial(entry)}</span>
+                <span class="hidden font-brand text-sm font-bold text-accent">{entryInitial(entry)}</span>
               {:else if entry.content_type === 'pdf'}
                 <svg class="w-3.5 h-3.5 text-red-400 dark:text-red-500/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                 </svg>
               {:else}
-                <span class="font-brand text-[10px] font-bold text-accent">{entryInitial(entry)}</span>
+                <span class="font-brand text-sm font-bold text-accent">{entryInitial(entry)}</span>
               {/if}
             </div>
 
             <div class="flex-1 min-w-0">
               <!-- Meta row: type + domain (clickable) -->
               <div class="flex items-center gap-1.5 mb-[3px]">
-                <span class="font-brand text-[9px] font-semibold uppercase tracking-wider
+                <span class="font-brand text-xs font-semibold uppercase tracking-wider
                   {entry.content_type === 'pdf' ? 'text-red-400 dark:text-red-500/70' : 'text-accent/70'}">
                   {entry.content_type === 'pdf' ? 'PDF' : 'WEB'}
                 </span>
@@ -117,7 +117,7 @@
               </div>
 
               <!-- Title -->
-              <h3 class="text-[13px] font-semibold text-text-primary truncate leading-snug">{entry.title}</h3>
+              <h3 class="text-base font-semibold text-text-primary truncate leading-snug">{entry.title}</h3>
 
               <!-- Tags — clickable (NEW: search results now show tags) -->
               {#if entry.tags.length > 0}
@@ -130,11 +130,11 @@
 
               <!-- Search snippet -->
               {#if hasSnippet(entry) && entry.snippet}
-                <p class="text-[11px] text-text-secondary mt-1 line-clamp-2 leading-relaxed">{@html entry.snippet}</p>
+                <p class="text-ui text-text-secondary mt-1 line-clamp-2 leading-relaxed">{@html entry.snippet}</p>
               {/if}
 
               <!-- Footer -->
-              <div class="flex items-center gap-2.5 mt-1.5 font-brand text-[10px] text-text-tertiary">
+              <div class="flex items-center gap-2.5 mt-1.5 font-brand text-sm text-text-tertiary">
                 <span>{formatDate(entry.created_at)}</span>
                 {#if entry.word_count}<span>{entry.word_count.toLocaleString()}w</span>{/if}
                 {#if entry.page_count}<span>{entry.page_count}pg</span>{/if}

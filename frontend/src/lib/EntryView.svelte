@@ -99,17 +99,17 @@
 <div class="flex-1 flex flex-col min-h-0 bg-surface">
   <!-- Toolbar -->
   <div class="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
-    <button class="text-[13px] text-text-secondary hover:text-accent flex items-center gap-1 transition-colors" onclick={onBack}>
+    <button class="text-base text-text-secondary hover:text-accent flex items-center gap-1 transition-colors" onclick={onBack}>
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path d="M15 19l-7-7 7-7" />
       </svg>
-      <span class="font-brand text-[11px]">ESC</span>
+      <span class="font-brand text-ui">ESC</span>
     </button>
 
     <div class="flex-1"></div>
 
     {#if entry.content_type === 'article' && content?.snapshot_html}
-      <div class="flex rounded-md border border-border text-[11px] overflow-hidden">
+      <div class="flex rounded-md border border-border text-ui overflow-hidden">
         <button
           class="px-2.5 py-1 transition-colors {viewMode === 'archive' ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-raised'}"
           onclick={() => viewMode = 'archive'}
@@ -123,13 +123,13 @@
 
     {#if entry.url}
       <a href={entry.url} target="_blank" rel="noopener noreferrer"
-        class="text-[11px] px-2.5 py-1 rounded-md border border-border text-text-secondary hover:bg-surface-raised transition-colors">
+        class="text-ui px-2.5 py-1 rounded-md border border-border text-text-secondary hover:bg-surface-raised transition-colors">
         Original
       </a>
     {/if}
 
     <button
-      class="text-[11px] px-2.5 py-1 rounded-md border transition-all duration-200
+      class="text-ui px-2.5 py-1 rounded-md border transition-all duration-200
         {confirmingDelete ? 'border-red-400 bg-red-500 text-white hover:bg-red-600' : 'border-border text-text-tertiary hover:text-red-500 hover:border-red-300 dark:hover:border-red-800'}"
       onclick={handleDelete}
     >{confirmingDelete ? 'Confirm?' : 'Delete'}</button>
@@ -137,10 +137,10 @@
 
   <!-- Entry header -->
   <div class="px-6 py-4 border-b border-border-subtle bg-surface-sunken shrink-0">
-    <h1 class="text-[16px] font-semibold text-text-primary leading-tight">{entry.title}</h1>
+    <h1 class="text-lg font-semibold text-text-primary leading-tight">{entry.title}</h1>
 
     <!-- Metadata row: domain (clickable), date, counts -->
-    <div class="flex items-center gap-3 mt-2 font-brand text-[11px] text-text-tertiary">
+    <div class="flex items-center gap-3 mt-2 font-brand text-ui text-text-tertiary">
       {#if entry.domain}
         <FilterChip label={entry.domain} variant="domain" onclick={() => onDomainClick?.(entry.domain!)} />
       {/if}
@@ -154,7 +154,7 @@
       {#each entry.tags as tag}
         <span class="inline-flex items-center gap-0.5">
           <FilterChip label={tag} variant="tag" onclick={() => onTagClick?.(tag)} />
-          <button class="text-accent/40 hover:text-accent text-[10px] transition-opacity" onclick={() => removeTag(tag)}>&times;</button>
+          <button class="text-accent/40 hover:text-accent text-sm transition-opacity" onclick={() => removeTag(tag)}>&times;</button>
         </span>
       {/each}
       <input
@@ -162,7 +162,7 @@
         bind:value={tagInput}
         onkeydown={handleTagKeydown}
         placeholder="+ tag"
-        class="text-[11px] px-1.5 py-[2px] w-14 bg-transparent border-b border-transparent focus:border-accent/30 outline-none text-text-secondary placeholder-text-tertiary"
+        class="text-ui px-1.5 py-[2px] w-14 bg-transparent border-b border-transparent focus:border-accent/30 outline-none text-text-secondary placeholder-text-tertiary"
       />
     </div>
 
@@ -179,16 +179,16 @@
   <!-- Related entries -->
   {#if similarEntries.length > 0}
     <div class="px-6 py-2.5 border-b border-border-subtle bg-surface shrink-0">
-      <h3 class="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-tertiary mb-2">Related</h3>
+      <h3 class="text-sm font-semibold uppercase tracking-[0.1em] text-text-tertiary mb-2">Related</h3>
       <div class="flex gap-2 overflow-x-auto scroll-x-hidden pb-1">
         {#each similarEntries as sim}
           <button
             class="shrink-0 px-2.5 py-1.5 rounded-md bg-surface-raised border border-border-subtle text-left
-              hover:border-accent/30 transition-all text-[11px] max-w-[200px]"
+              hover:border-accent/30 transition-all text-ui max-w-[200px]"
             onclick={() => onNavigate?.(sim)}
           >
             <p class="font-medium text-text-primary truncate">{sim.title}</p>
-            <span class="font-brand text-[9px] text-text-tertiary">{Math.round(sim.similarity * 100)}% match</span>
+            <span class="font-brand text-xs text-text-tertiary">{Math.round(sim.similarity * 100)}% match</span>
           </button>
         {/each}
       </div>
@@ -203,8 +203,8 @@
       </div>
     {:else if loadError}
       <div class="flex flex-col items-center justify-center h-full gap-3">
-        <p class="text-[13px] text-red-500">{loadError}</p>
-        <button class="px-3 py-1.5 rounded-md bg-surface-raised border border-border text-text-secondary hover:bg-surface-sunken text-[11px] transition-colors"
+        <p class="text-base text-red-500">{loadError}</p>
+        <button class="px-3 py-1.5 rounded-md bg-surface-raised border border-border text-text-secondary hover:bg-surface-sunken text-ui transition-colors"
           onclick={() => loadContent(entry.id)}>Retry</button>
       </div>
     {:else if entry.content_type === 'pdf' && content?.pdf_base64}
@@ -219,12 +219,12 @@
       </div>
     {:else if content?.extracted_text}
       <div class="overflow-y-auto h-full bg-surface-raised">
-        <div class="max-w-2xl mx-auto px-6 py-8 text-[13px] text-text-secondary whitespace-pre-wrap leading-relaxed">
+        <div class="max-w-2xl mx-auto px-6 py-8 text-base text-text-secondary whitespace-pre-wrap leading-relaxed">
           {content.extracted_text}
         </div>
       </div>
     {:else}
-      <div class="flex items-center justify-center h-full text-text-tertiary text-[13px]">No content available</div>
+      <div class="flex items-center justify-center h-full text-text-tertiary text-base">No content available</div>
     {/if}
   </div>
 </div>
