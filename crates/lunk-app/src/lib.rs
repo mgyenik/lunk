@@ -1,3 +1,4 @@
+mod chat_commands;
 mod commands;
 mod llm_commands;
 
@@ -138,6 +139,7 @@ pub fn run() {
             llm_commands::delete_model,
             llm_commands::activate_model,
             llm_commands::set_title_generation,
+            chat_commands::send_chat_message,
         ])
         .setup(move |app| {
             // System tray
@@ -224,11 +226,12 @@ pub fn run() {
                     match with_db(&backfill_pool, |conn| {
                         let emb = lunk_core::embeddings::embed_all_missing(conn, &backfill_model)?;
                         let kw = lunk_core::keywords::extract_all_missing(conn)?;
-                        Ok((emb, kw))
+                        let chunks = lunk_core::chunks::chunk_all_missing(conn, &backfill_model)?;
+                        Ok((emb, kw, chunks))
                     }) {
-                        Ok((emb, kw)) => {
-                            if emb > 0 || kw > 0 {
-                                tracing::info!("backfill: {emb} embeddings, {kw} keyword extractions");
+                        Ok((emb, kw, chunks)) => {
+                            if emb > 0 || kw > 0 || chunks > 0 {
+                                tracing::info!("backfill: {emb} embeddings, {kw} keywords, {chunks} chunks");
                             }
                         }
                         Err(e) => tracing::warn!("backfill failed: {e}"),

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use lunk_core::db::{with_db, with_db_mut, DbPool};
 use lunk_core::models::*;
-use lunk_core::{embeddings, keywords, repo, search, sync, topics};
+use lunk_core::{chunks, embeddings, keywords, repo, search, sync, topics};
 
 use crate::SyncNodeCell;
 
@@ -198,12 +198,13 @@ pub fn import_pdf(
     let entry = with_db_mut(&db, |db| repo::create_pdf_entry(db, req, pages))
         .map_err(|e| e.to_string())?;
 
-    // Generate embedding + keywords for the new entry
+    // Generate embedding + keywords + chunks for the new entry
     let entry_id = entry.id;
     let model = model.inner();
     if let Err(e) = with_db(&db, |conn| {
         embeddings::embed_entry(conn, model, &entry_id)?;
         keywords::extract_and_store(conn, &entry_id)?;
+        chunks::chunk_and_embed_entry(conn, model, &entry_id)?;
         Ok(())
     }) {
         tracing::warn!(%entry_id, "post-save semantic processing failed: {e}");
@@ -368,6 +369,7 @@ pub fn get_entry_keywords(
 pub struct BackfillResult {
     pub embeddings_created: usize,
     pub keywords_extracted: usize,
+    pub chunks_created: usize,
 }
 
 #[tauri::command]
@@ -378,9 +380,11 @@ pub fn trigger_backfill(
     with_db(&db, |conn| {
         let embeddings_created = embeddings::embed_all_missing(conn, &model)?;
         let keywords_extracted = keywords::extract_all_missing(conn)?;
+        let chunks_created = chunks::chunk_all_missing(conn, &model)?;
         Ok(BackfillResult {
             embeddings_created,
             keywords_extracted,
+            chunks_created,
         })
     })
     .map_err(|e| e.to_string())

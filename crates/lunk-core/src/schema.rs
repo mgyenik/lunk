@@ -3,7 +3,7 @@ use rusqlite::{params, Connection};
 use crate::errors::Result;
 
 /// Current schema version. Bump this when adding a new migration.
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 6;
 
 /// A schema migration: version number, human description, and migration function.
 struct Migration {
@@ -49,6 +49,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 5,
         description: "Add embedding and keyword storage for semantic features",
         up: migrate_v5,
+    },
+    Migration {
+        version: 6,
+        description: "Add chunk embeddings for RAG retrieval",
+        up: migrate_v6,
     },
 ];
 
@@ -489,6 +494,25 @@ fn migrate_v5(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_entry_keywords_keyword
             ON entry_keywords(keyword);",
+    )?;
+    Ok(())
+}
+
+fn migrate_v6(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS entry_chunks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id    TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+            chunk_index INTEGER NOT NULL,
+            chunk_text  TEXT NOT NULL,
+            embedding   BLOB NOT NULL,
+            model_version TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            UNIQUE(entry_id, chunk_index)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_entry_chunks_entry
+            ON entry_chunks(entry_id);",
     )?;
     Ok(())
 }

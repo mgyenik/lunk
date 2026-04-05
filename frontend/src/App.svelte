@@ -10,11 +10,12 @@
   import SyncPanel from './lib/SyncPanel.svelte';
   import SettingsPanel from './lib/SettingsPanel.svelte';
   import WelcomeFlow from './lib/WelcomeFlow.svelte';
+  import ChatView from './lib/ChatView.svelte';
   import { api, type Entry, type SearchHit, type TopicSummary, type ArchiveStats, type TagWithCount } from './api';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { open } from '@tauri-apps/plugin-dialog';
 
-  type ViewType = 'home' | 'browse' | 'search' | 'detail' | 'sync' | 'settings';
+  type ViewType = 'home' | 'browse' | 'search' | 'detail' | 'sync' | 'settings' | 'chat';
 
   let currentView = $state<ViewType>('home');
   let entries = $state<(Entry | SearchHit)[]>([]);
@@ -107,7 +108,7 @@
 
   // --- Navigation handlers ---
 
-  function handleNavigate(view: 'home' | 'sync' | 'settings') {
+  function handleNavigate(view: 'home' | 'sync' | 'settings' | 'chat') {
     currentView = view;
     selectedEntry = null;
     selectedMatchedPage = undefined;
@@ -344,6 +345,8 @@
       <SyncPanel />
     {:else if currentView === 'settings'}
       <SettingsPanel />
+    {:else if currentView === 'chat'}
+      <ChatView onNavigateToEntry={handleSelect} />
     {/if}
   </div>
 </div>

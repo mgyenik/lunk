@@ -1,9 +1,9 @@
 <script lang="ts">
-  type ViewType = 'home' | 'browse' | 'search' | 'detail' | 'sync' | 'settings';
+  type ViewType = 'home' | 'browse' | 'search' | 'detail' | 'sync' | 'settings' | 'chat';
 
   interface Props {
     currentView: ViewType;
-    onNavigate: (view: 'home' | 'sync' | 'settings') => void;
+    onNavigate: (view: 'home' | 'sync' | 'settings' | 'chat') => void;
     onImportPdf: () => void;
   }
   let { currentView, onNavigate, onImportPdf }: Props = $props();
@@ -42,6 +42,18 @@
   >
     <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
       <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+    </svg>
+  </button>
+
+  <!-- Chat -->
+  <button
+    class="w-9 h-9 rounded-lg flex items-center justify-center transition-all
+      {isActive('chat') ? 'bg-accent-soft text-accent' : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-raised'}"
+    onclick={() => onNavigate('chat')}
+    title="Chat with your archive"
+  >
+    <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+      <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
     </svg>
   </button>
 

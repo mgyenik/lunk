@@ -137,12 +137,37 @@ impl LlmEngine {
             .unwrap_or(false)
     }
 
-    /// Generate a completion for the given prompt.
-    ///
-    /// Returns the generated text (not including the prompt). Creates a fresh
-    /// context per call — safe to call from any thread, but only one inference
-    /// runs at a time per context.
+    /// Generate a completion for the given prompt (greedy, no streaming).
+    /// Convenience wrapper around `stream_complete`.
     pub fn complete(&self, prompt: &str, max_tokens: u32) -> Result<String> {
+        self.stream_complete(
+            prompt,
+            &SamplingParams {
+                max_tokens,
+                ..SamplingParams::default()
+            },
+            None,
+            |_| {},
+        )
+    }
+
+    /// Generate a completion with streaming and configurable sampling.
+    ///
+    /// Calls `on_token` for each generated token piece. Returns the full
+    /// generated text. Creates a fresh context per call.
+    ///
+    /// `n_ctx` overrides the context window size (default: prompt + max_tokens + 64,
+    /// capped at 4096). Pass a larger value for RAG prompts.
+    pub fn stream_complete<F>(
+        &self,
+        prompt: &str,
+        params: &SamplingParams,
+        n_ctx: Option<u32>,
+        mut on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str),
+    {
         let guard = self
             .inner
             .model
@@ -164,10 +189,11 @@ impl LlmEngine {
         }
 
         // Create context
-        let n_ctx = (tokens.len() as u32 + max_tokens + 64).min(4096);
+        let default_ctx = (tokens.len() as u32 + params.max_tokens + 64).min(4096);
+        let ctx_size = n_ctx.unwrap_or(default_ctx);
         let backend = get_backend()?;
         let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(NonZeroU32::new(n_ctx));
+            .with_n_ctx(NonZeroU32::new(ctx_size));
 
         let mut ctx = model
             .new_context(backend, ctx_params)
@@ -187,10 +213,17 @@ impl LlmEngine {
         ctx.decode(&mut batch)
             .map_err(|e| LunkError::Llm(format!("decode prompt: {e}")))?;
 
-        // Build sampler: greedy (temperature=0 for deterministic output)
-        let mut sampler = LlamaSampler::chain_simple([LlamaSampler::greedy()]);
+        // Build sampler chain based on temperature
+        let mut sampler = if params.temperature > 0.0 {
+            LlamaSampler::chain_simple([
+                LlamaSampler::top_p(params.top_p, 1),
+                LlamaSampler::temp(params.temperature),
+                LlamaSampler::dist(42),
+            ])
+        } else {
+            LlamaSampler::chain_simple([LlamaSampler::greedy()])
+        };
 
-        // Accept prompt tokens so the sampler knows the history
         sampler.accept_many(&tokens);
 
         // Generate tokens
@@ -198,7 +231,7 @@ impl LlmEngine {
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut n_cur = tokens.len() as i32;
 
-        for _ in 0..max_tokens {
+        for _ in 0..params.max_tokens {
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(token);
 
@@ -208,7 +241,10 @@ impl LlmEngine {
 
             // Detokenize
             match model.token_to_piece(token, &mut decoder, false, None) {
-                Ok(piece) => output.push_str(&piece),
+                Ok(piece) => {
+                    on_token(&piece);
+                    output.push_str(&piece);
+                }
                 Err(e) => {
                     tracing::warn!("token decode error: {e}");
                     break;
@@ -227,6 +263,27 @@ impl LlmEngine {
         }
 
         Ok(output)
+    }
+}
+
+/// Sampling parameters for LLM generation.
+#[derive(Debug, Clone)]
+pub struct SamplingParams {
+    /// Temperature (0.0 = greedy/deterministic, 0.3-0.5 for RAG).
+    pub temperature: f32,
+    /// Nucleus sampling threshold (default 0.9).
+    pub top_p: f32,
+    /// Maximum tokens to generate.
+    pub max_tokens: u32,
+}
+
+impl Default for SamplingParams {
+    fn default() -> Self {
+        Self {
+            temperature: 0.0,
+            top_p: 0.9,
+            max_tokens: 256,
+        }
     }
 }
 

@@ -140,6 +140,25 @@ export interface DownloadProgressEvent {
   error: string | null;
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatSource {
+  label: string;
+  entry_id: string;
+  entry_title: string;
+  snippet: string;
+}
+
+export interface ChatResponseEvent {
+  session_id: string;
+  token: string;
+  done: boolean;
+  sources: ChatSource[] | null;
+}
+
 export const api = {
   search(query: string, limit = 50, offset = 0): Promise<SearchResult> {
     return invoke('search_entries', { query, limit, offset });
@@ -251,6 +270,12 @@ export const api = {
 
   setTitleGeneration(enabled: boolean): Promise<void> {
     return invoke('set_title_generation', { enabled });
+  },
+
+  // --- RAG Chat ---
+
+  sendChatMessage(message: string, history: ChatMessage[], sessionId: string): Promise<void> {
+    return invoke('send_chat_message', { message, history, sessionId });
   },
 };
 

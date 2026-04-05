@@ -1,4 +1,5 @@
 pub mod change_tracking;
+pub mod chunks;
 pub mod config;
 pub mod db;
 pub mod embeddings;
@@ -11,6 +12,7 @@ pub mod llm_models;
 pub mod llm_titles;
 pub mod models;
 pub mod pdf;
+pub mod rag;
 pub mod repo;
 pub mod schema;
 pub mod search;
