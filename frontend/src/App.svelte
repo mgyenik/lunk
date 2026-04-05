@@ -288,14 +288,16 @@
 
   <div class="flex-1 flex flex-col min-w-0">
     {#if currentView === 'home'}
-      <HomeView
-        {topics} {stats} {recentEntries} {allTags}
-        onSearch={handleSearch}
-        onTopicSelect={handleTopicSelect}
-        onEntrySelect={handleSelect}
-        onBrowseAll={handleBrowseAll}
-        onTagSelect={handleFilterTag}
-      />
+      <div class="flex-1 flex flex-col min-h-0" in:fade={{ duration: 100 }}>
+        <HomeView
+          {topics} {stats} {recentEntries} {allTags}
+          onSearch={handleSearch}
+          onTopicSelect={handleTopicSelect}
+          onEntrySelect={handleSelect}
+          onBrowseAll={handleBrowseAll}
+          onTagSelect={handleFilterTag}
+        />
+      </div>
     {:else if currentView === 'detail' && selectedEntry}
       <div class="flex-1 min-h-0 flex flex-col" in:fly={{ x: 20, duration: 150 }} out:fade={{ duration: 80 }}>
         <EntryView
@@ -311,38 +313,46 @@
         />
       </div>
     {:else if currentView === 'search'}
-      <SearchBar value={searchQuery} onSearch={handleSearch} />
-      <EntryList
-        {entries} {totalCount} {isLoading}
-        currentView="search"
-        {searchQuery}
-        onSelect={handleSelect}
-        onTagClick={handleFilterTag}
-        onDomainClick={handleFilterDomain}
-      />
+      <div class="flex-1 flex flex-col min-h-0" in:fade={{ duration: 100 }}>
+        <SearchBar value={searchQuery} onSearch={handleSearch} />
+        <EntryList
+          {entries} {totalCount} {isLoading}
+          currentView="search"
+          {searchQuery}
+          onSelect={handleSelect}
+          onTagClick={handleFilterTag}
+          onDomainClick={handleFilterDomain}
+        />
+      </div>
     {:else if currentView === 'browse'}
-      <FilterBar
-        tag={filterTag}
-        domain={filterDomain}
-        contentType={filterContentType}
-        onClearTag={() => { filterTag = null; loadBrowseEntries(); }}
-        onClearDomain={() => { filterDomain = null; loadBrowseEntries(); }}
-        onClearContentType={() => { filterContentType = 'all'; loadBrowseEntries(); }}
-        onClearAll={() => { clearAllFilters(); loadBrowseEntries(); }}
-      />
-      <EntryGrid
-        {entries} {totalCount} {isLoading}
-        title={browseTitle()}
-        onSelect={handleSelect}
-        onBack={() => handleNavigate('home')}
-        onTagClick={handleFilterTag}
-        onDomainClick={handleFilterDomain}
-        onContentTypeClick={handleFilterContentType}
-      />
+      <div class="flex-1 flex flex-col min-h-0" in:fade={{ duration: 100 }}>
+        <FilterBar
+          tag={filterTag}
+          domain={filterDomain}
+          contentType={filterContentType}
+          onClearTag={() => { filterTag = null; loadBrowseEntries(); }}
+          onClearDomain={() => { filterDomain = null; loadBrowseEntries(); }}
+          onClearContentType={() => { filterContentType = 'all'; loadBrowseEntries(); }}
+          onClearAll={() => { clearAllFilters(); loadBrowseEntries(); }}
+        />
+        <EntryGrid
+          {entries} {totalCount} {isLoading}
+          title={browseTitle()}
+          onSelect={handleSelect}
+          onBack={() => handleNavigate('home')}
+          onTagClick={handleFilterTag}
+          onDomainClick={handleFilterDomain}
+          onContentTypeClick={handleFilterContentType}
+        />
+      </div>
     {:else if currentView === 'sync'}
-      <SyncPanel />
+      <div class="flex-1 flex flex-col min-h-0" in:fade={{ duration: 100 }}>
+        <SyncPanel />
+      </div>
     {:else if currentView === 'settings'}
-      <SettingsPanel />
+      <div class="flex-1 flex flex-col min-h-0" in:fade={{ duration: 100 }}>
+        <SettingsPanel />
+      </div>
     {/if}
 
     <!-- ChatView stays mounted (hidden) so conversation state persists across navigation -->
