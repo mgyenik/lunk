@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # Lunk installer for Linux/macOS
-# Usage: curl -fsSL https://raw.githubusercontent.com/mgyenik/lunk/main/scripts/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/mgyenik/grymoire/main/scripts/install.sh | bash
 #    or: ./install.sh [version]
 
-REPO="mgyenik/lunk"
+REPO="mgyenik/grymoire"
 INSTALL_DIR="${LUNK_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${1:-latest}"
 
@@ -29,7 +29,7 @@ case "$ARCH" in
   *)             err "Unsupported architecture: $ARCH" ;;
 esac
 
-BINARY_NAME="lunk-${PLATFORM}-${ARCH}"
+BINARY_NAME="grymoire-${PLATFORM}-${ARCH}"
 
 # Resolve version
 if [ "$VERSION" = "latest" ]; then
@@ -41,7 +41,7 @@ if [ "$VERSION" = "latest" ]; then
   fi
 fi
 
-info "Installing lunk ${VERSION} for ${PLATFORM}-${ARCH}"
+info "Installing grymoire ${VERSION} for ${PLATFORM}-${ARCH}"
 
 # Download
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY_NAME}"
@@ -49,14 +49,14 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 info "Downloading from ${DOWNLOAD_URL}..."
-curl -fsSL -o "${TMP_DIR}/lunk" "$DOWNLOAD_URL" || err "Download failed. Check that version ${VERSION} exists."
+curl -fsSL -o "${TMP_DIR}/grymoire" "$DOWNLOAD_URL" || err "Download failed. Check that version ${VERSION} exists."
 
 # Install
 mkdir -p "$INSTALL_DIR"
-chmod +x "${TMP_DIR}/lunk"
-mv "${TMP_DIR}/lunk" "${INSTALL_DIR}/lunk"
+chmod +x "${TMP_DIR}/grymoire"
+mv "${TMP_DIR}/grymoire" "${INSTALL_DIR}/grymoire"
 
-ok "Installed lunk to ${INSTALL_DIR}/lunk"
+ok "Installed grymoire to ${INSTALL_DIR}/grymoire"
 
 # Check PATH
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
@@ -69,4 +69,4 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
 fi
 
 echo ""
-ok "Run 'lunk --help' to get started"
+ok "Run 'grymoire --help' to get started"

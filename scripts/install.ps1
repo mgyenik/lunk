@@ -1,10 +1,10 @@
 # Lunk installer for Windows
-# Usage: irm https://raw.githubusercontent.com/mgyenik/lunk/main/scripts/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/mgyenik/grymoire/main/scripts/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
-$Repo = "mgyenik/lunk"
-$InstallDir = if ($env:LUNK_INSTALL_DIR) { $env:LUNK_INSTALL_DIR } else { "$env:LOCALAPPDATA\lunk\bin" }
+$Repo = "mgyenik/grymoire"
+$InstallDir = if ($env:GRYMOIRE_INSTALL_DIR) { $env:GRYMOIRE_INSTALL_DIR } else { "$env:LOCALAPPDATA\grymoire\bin" }
 
 function Write-Info { Write-Host "==> $args" -ForegroundColor Cyan }
 function Write-Ok   { Write-Host "==> $args" -ForegroundColor Green }
@@ -20,15 +20,15 @@ try {
     exit 1
 }
 
-Write-Info "Installing lunk $Version for Windows x86_64"
+Write-Info "Installing grymoire $Version for Windows x86_64"
 
-$BinaryName = "lunk-windows-x86_64.exe"
+$BinaryName = "grymoire-windows-x86_64.exe"
 $DownloadUrl = "https://github.com/$Repo/releases/download/$Version/$BinaryName"
 
 # Create install directory
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-$OutFile = Join-Path $InstallDir "lunk.exe"
+$OutFile = Join-Path $InstallDir "grymoire.exe"
 
 # Download
 Write-Info "Downloading from $DownloadUrl..."
@@ -39,7 +39,7 @@ try {
     exit 1
 }
 
-Write-Ok "Installed lunk to $OutFile"
+Write-Ok "Installed grymoire to $OutFile"
 
 # Add to user PATH if not already there
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -51,4 +51,4 @@ if ($UserPath -notlike "*$InstallDir*") {
 }
 
 Write-Host ""
-Write-Ok "Run 'lunk --help' to get started"
+Write-Ok "Run 'grymoire --help' to get started"
