@@ -26,6 +26,7 @@
   let isLoading = $state(false);
   let isDragOver = $state(false);
   let showWelcome = $state(false);
+  let previousView = $state<ViewType>('home');
 
   // Home data
   let topics = $state<TopicSummary[]>([]);
@@ -145,6 +146,7 @@
   }
 
   function handleSelect(entry: Entry, matchedPage?: number) {
+    previousView = currentView;
     selectedEntry = entry;
     selectedMatchedPage = matchedPage;
     currentView = 'detail';
@@ -153,13 +155,9 @@
   function handleBack() {
     selectedEntry = null;
     selectedMatchedPage = undefined;
-    if (searchQuery.trim()) {
-      currentView = 'search';
-    } else if (activeTopic !== null || hasFilters) {
-      currentView = 'browse';
-    } else {
-      currentView = 'home';
-    }
+    currentView = previousView;
+    // For views that need a reload, trigger it
+    if (previousView === 'home') loadHomeData();
   }
 
   // --- Filter handlers (the core new functionality) ---
@@ -345,9 +343,12 @@
       <SyncPanel />
     {:else if currentView === 'settings'}
       <SettingsPanel />
-    {:else if currentView === 'chat'}
-      <ChatView onNavigateToEntry={handleSelect} />
     {/if}
+
+    <!-- ChatView stays mounted (hidden) so conversation state persists across navigation -->
+    <div class="flex-1 flex flex-col min-w-0" class:hidden={currentView !== 'chat'}>
+      <ChatView onNavigateToEntry={handleSelect} />
+    </div>
   </div>
 </div>
 
