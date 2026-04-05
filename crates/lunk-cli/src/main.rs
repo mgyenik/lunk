@@ -119,6 +119,15 @@ enum Commands {
     RebuildFts,
     /// Re-extract titles for all entries using current extraction logic
     Retitle,
+    /// Re-generate titles for all entries using the LLM
+    LlmRetitle {
+        /// Model catalog ID (default: qwen2.5-1.5b-q4km)
+        #[arg(long, default_value = "qwen2.5-1.5b-q4km")]
+        model: String,
+        /// Only retitle entries with generic/bad titles
+        #[arg(long)]
+        bad_only: bool,
+    },
     /// Re-extract text from stored PDFs that have no extracted text
     BackfillPdfs,
     /// Transfer entries from another profile or database
@@ -209,6 +218,7 @@ async fn main() {
         Some(Commands::Transfer { from }) => cli::transfer(&from),
         Some(Commands::RebuildFts) => cli::rebuild_fts(),
         Some(Commands::Retitle) => cli::retitle(),
+        Some(Commands::LlmRetitle { model, bad_only }) => cli::llm_retitle(&model, bad_only),
         Some(Commands::BackfillPdfs) => cli::backfill_pdfs(),
         Some(Commands::MigrateStatus) => cli::migrate_status(),
         None => {

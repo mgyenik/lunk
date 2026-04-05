@@ -426,6 +426,98 @@ pub fn retitle() -> Result<()> {
     Ok(())
 }
 
+pub fn llm_retitle(model_id: &str, bad_only: bool) -> Result<()> {
+    use lunk_core::{llm_catalog, llm_engine, llm_models, llm_titles};
+    use rusqlite::params;
+    use std::time::Instant;
+
+    let db_path = Config::db_path()?;
+    eprintln!("database: {}", db_path.display());
+
+    // Load model
+    let entry = llm_catalog::get_catalog_entry(model_id)
+        .ok_or_else(|| LunkError::Other(format!("unknown model: {model_id}")))?;
+    let path = llm_models::model_path(entry)?;
+    if !path.exists() {
+        return Err(LunkError::Other(format!(
+            "model not downloaded: {model_id}\nExpected at: {}",
+            path.display()
+        )));
+    }
+
+    eprintln!("loading model: {} ...", entry.name);
+    let t0 = Instant::now();
+    let engine = llm_engine::LlmEngine::new()?;
+    engine.load_model(&path, model_id)?;
+    eprintln!("model loaded in {:.1}s", t0.elapsed().as_secs_f64());
+
+    let conn = open_conn()?;
+
+    // Get all entries with their text
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.title, e.content_type, ec.extracted_text
+         FROM entries e
+         JOIN entry_content ec ON ec.entry_id = e.id
+         ORDER BY e.created_at DESC",
+    )?;
+
+    let rows: Vec<(String, String, String, String)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let total = rows.len();
+    let mut updated = 0;
+    let mut skipped = 0;
+
+    let template = Some(entry.chat_template);
+
+    for (id, old_title, _content_type, extracted_text) in &rows {
+        if extracted_text.len() < 50 {
+            skipped += 1;
+            continue;
+        }
+
+        if bad_only && !lunk_core::pdf::is_generic_title(old_title) {
+            skipped += 1;
+            continue;
+        }
+
+        let t = Instant::now();
+        match llm_titles::generate_title(&engine, extracted_text, template) {
+            Some(new_title) if new_title != *old_title => {
+                conn.execute(
+                    "UPDATE entries SET title = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![&new_title, chrono::Utc::now().to_rfc3339(), id],
+                )?;
+                println!(
+                    "  [{id:.8}] {:.1}s",
+                    t.elapsed().as_secs_f64()
+                );
+                println!("    old: {old_title}");
+                println!("    new: {new_title}");
+                updated += 1;
+            }
+            Some(_) => {
+                // LLM produced same title — skip
+            }
+            None => {
+                eprintln!("  [{id:.8}] LLM failed, keeping old title");
+            }
+        }
+    }
+
+    println!("\nDone: {updated} updated, {skipped} skipped, {total} total");
+    Ok(())
+}
+
 pub fn rebuild_fts() -> Result<()> {
     let profile = config::active_profile();
     let db_path = Config::db_path()?;

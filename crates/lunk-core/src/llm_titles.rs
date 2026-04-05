@@ -71,8 +71,13 @@ pub fn generate_title(
 
 /// Format a title generation prompt for the given chat template.
 fn format_title_prompt(template: ChatTemplate, text: &str) -> String {
-    let system = "You generate concise document titles. Output ONLY the title, nothing else.";
-    let user = format!("Generate a short, descriptive title for this document:\n\n{text}");
+    let system = "You extract or generate document titles. Rules:\n\
+        - If the document has a clear title (heading, paper title, datasheet name), use it exactly\n\
+        - Only generate a summary title if the document has no clear title\n\
+        - Preserve part numbers (MP6002, AD9446, LT1533), application note numbers (AN133), and model numbers\n\
+        - Output ONLY the title, nothing else. No quotes, no explanation\n\
+        - Maximum 15 words";
+    let user = format!("What is the title of this document?\n\n{text}");
 
     match template {
         ChatTemplate::ChatML => {
